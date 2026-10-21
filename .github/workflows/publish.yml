@@ -7,9 +7,8 @@
 #   2. on tag builds, the jars are attached to a GitHub Release of the same name, which can
 #      be downloaded without any token:
 #      https://github.com/<owner>/<repo>/releases/download/<tag>/<artifact>-<version>.jar
-#   3. if the repository secret CDOC_PACKAGES_TOKEN is set (a PAT with "Packages: write" on
-#      bucketplace/cdoc), the same artifacts are deployed to the bucketplace/cdoc GitHub Packages
-#      registry, which is where the cdoc flink-app image downloads its connectors from.
+#      Downstream images pull the jars from this URL (pinned by sha256) at build time;
+#      nothing is pushed anywhere else from here.
 #
 # Trigger: push a tag `v<connector>-<flink>` (e.g. v4.0.1-bp2-2.1) or run manually.
 # The pom version is the source of truth for the artifact version; the tag is only
@@ -65,32 +64,6 @@ jobs:
           -DaltDeploymentRepository=github::default::https://maven.pkg.github.com/${{ github.repository }}
           -pl flink-connector-elasticsearch8,flink-sql-connector-elasticsearch8 -am
           deploy
-
-      - name: Deploy to bucketplace/cdoc GitHub Packages (only when CDOC_PACKAGES_TOKEN is set)
-        if: env.CDOC_PACKAGES_TOKEN != ''
-        env:
-          CDOC_PACKAGES_TOKEN: ${{ secrets.CDOC_PACKAGES_TOKEN }}
-        run: |
-          set -euo pipefail
-          # a dedicated settings.xml so the token is only ever used for this one server id
-          cat > "$RUNNER_TEMP/cdoc-settings.xml" <<'EOF'
-          <settings>
-            <servers>
-              <server>
-                <id>cdoc</id>
-                <username>${env.GITHUB_ACTOR}</username>
-                <password>${env.CDOC_PACKAGES_TOKEN}</password>
-              </server>
-            </servers>
-          </settings>
-          EOF
-          mvn -B -ntp -s "$RUNNER_TEMP/cdoc-settings.xml" \
-            -Dflink.version=${FLINK_VERSION} \
-            -Drat.skip=true -Dmaven.javadoc.skip=true \
-            -DskipTests -Dgpg.skip=true \
-            -DaltDeploymentRepository=cdoc::default::https://maven.pkg.github.com/bucketplace/cdoc \
-            -pl flink-connector-elasticsearch8,flink-sql-connector-elasticsearch8 -am \
-            deploy
 
       - name: Attach jars to a GitHub Release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/')
