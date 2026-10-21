@@ -52,6 +52,10 @@ under the License.
 
 	<properties>
 		<flink.version>2.0.0</flink.version>
+		<!-- bucketplace fork: the ASF license checker (JarFileChecker in flink-ci-tools) only knows
+		     the EPL-2.0 / GPL-2.0-with-CPE dual-licence false positive of org.eclipse.parsson since
+		     Flink 2.2 (FLINK-39818). It is a build-time tool, so pin it independently of flink.version. -->
+		<flink.ci-tools.version>2.2.1</flink.ci-tools.version>
 
 		<jackson-bom.version>2.15.3</jackson-bom.version>
 		<junit4.version>4.13.2</junit4.version>
@@ -423,7 +427,7 @@ under the License.
 					<dependency>
 						<groupId>org.apache.flink</groupId>
 						<artifactId>flink-ci-tools</artifactId>
-						<version>${flink.version}</version>
+						<version>${flink.ci-tools.version}</version>
 					</dependency>
 				</dependencies>
 			</plugin>
