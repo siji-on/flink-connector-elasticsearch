@@ -144,11 +144,38 @@ compileOnly("org.apache.flink:flink-streaming-java:2.1.3")
 poison pill 이 운영상 문제가 되면 `Elasticsearch8AsyncWriter#handlePartiallyFailedRequest` 에 "재시도 불가
 오류(400 mapper_parsing_exception 등) 는 drop + 카운트" 하는 분기를 이 포크에서 추가하는 것을 권한다.
 
-## 배포 (GitHub Packages)
+## 배포
 
-`.github/workflows/publish.yml` — `v*` 태그 push 또는 수동 실행으로 이 저장소의 GitHub Packages 에
-`org.apache.flink:flink-connector-elasticsearch8` / `flink-sql-connector-elasticsearch8` 를 올린다.
-소비 측(cdoc Gradle, `download-packages.sh`)은 `https://maven.pkg.github.com/bucketplace/*` 를 저장소로 추가하면 된다.
+저장소는 `siji-on/flink-connector-elasticsearch` (apache 저장소의 public 포크, 개인 계정) 이다. 업스트림이
+2.1 릴리즈를 내기 전까지만 쓰는 포크라 org 저장소를 만들지 않았다. 기본 브랜치는 `bp/v4.0-flink-2.1`.
+
+`.github/workflows/publish.yml` — `v*` 태그 push 또는 수동 실행으로 두 곳에 올린다.
+
+| 위치 | 인증 | 용도 |
+| --- | --- | --- |
+| GitHub Release `https://github.com/siji-on/flink-connector-elasticsearch/releases/download/<tag>/<artifact>-<ver>.jar` | 없음 | cdoc 에서 받을 때 이걸 쓴다 |
+| 이 저장소의 GitHub Packages (`maven.pkg.github.com/siji-on/flink-connector-elasticsearch`) | `read:packages` 토큰 | 로컬 Maven/Gradle 에서 편할 때 |
+
+cdoc 의 Actions `GITHUB_TOKEN` 은 org 밖(개인 계정) 패키지를 읽지 못하므로 Packages 쪽은 cdoc 빌드에서 쓰지 않는다.
+Gradle 에서 토큰 없이 받으려면 Release 다운로드 URL 을 ivy 패턴 저장소로 잡는다:
+
+```kotlin
+repositories {
+    ivy {
+        url = uri("https://github.com/siji-on/flink-connector-elasticsearch/releases/download/")
+        patternLayout { artifact("v[revision]/[artifact]-[revision].[ext]") }
+        metadataSources { artifact() }
+        content { includeGroup("org.apache.flink") }   // 다른 그룹은 이 저장소를 보지 않게
+    }
+}
+dependencies {
+    implementation("org.apache.flink:flink-connector-elasticsearch8:4.0.1-bp1-2.1")
+}
+```
+
+`metadataSources { artifact() }` 라 pom 이 없고, 따라서 **전이 의존성이 따라오지 않는다.** 커넥터가 필요한
+`co.elastic.clients:elasticsearch-java:8.12.1` 과 `org.apache.httpcomponents:httpasyncclient` 는 잡 쪽에서 직접
+`implementation` 으로 적는다 (업스트림 `flink-connector-elasticsearch8/pom.xml` 의 compile 의존성 참고).
 
 버전 규칙은 업스트림과 같이 `<connector>-<flink>` 이고, 업스트림 릴리즈와 구분하기 위해 `bp<N>` 을 끼운다:
 `4.0.1-bp1-2.1`.
