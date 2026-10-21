@@ -187,9 +187,8 @@ abstract class Elasticsearch8DynamicSinkBaseITCase {
 
     boolean documentExists(String index, String id)
             throws ExecutionException, InterruptedException {
-        return client.exists(new ExistsRequest.Builder().index(index).id(id).build())
-                .get()
-                .value();
+        ExistsRequest request = new ExistsRequest.Builder().index(index).id(id).build();
+        return client.exists(request).get().value();
     }
 
     @SuppressWarnings({"unchecked"})
