@@ -257,6 +257,24 @@ CREATE TABLE myUserTable (
       <td>String</td>
       <td>Elasticsearch 连接器支持指定格式。该格式必须生成一个有效的 json 文档。
        默认使用内置的 <code>'json'</code> 格式。更多详细信息，请参阅 <a href="{{< ref "docs/connectors/table/formats/overview" >}}">JSON Format</a> 页面。
+       文档内容由该格式生成，因此嵌套的 <code>ROW</code>、<code>ARRAY</code>、<code>MAP</code> 列以及格式选项
+       （例如 <code>'json.timestamp-format.standard'</code>）的行为与其他 table sink 一致。
+      </td>
+    </tr>
+    <tr>
+      <td><h5>sink.flush-on-checkpoint</h5></td>
+      <td>可选</td>
+      <td style="word-wrap: break-word;">true</td>
+      <td>Boolean</td>
+      <td>为兼容旧的基于 <code>SinkFunction</code> 的连接器而接受。sink 总是在 checkpoint 时刷新缓冲的操作；<code>'false'</code> 会被忽略并打印警告。
+      </td>
+    </tr>
+    <tr>
+      <td><h5>sink.bulk-flush.backoff.strategy</h5><br><h5>sink.bulk-flush.backoff.max-retries</h5><br><h5>sink.bulk-flush.backoff.delay</h5></td>
+      <td>可选</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>String<br>Integer<br>Duration</td>
+      <td>为兼容旧连接器而接受，会被忽略并打印警告。失败的 bulk 条目由 sink 自身重试。
       </td>
     </tr>
     </tbody>

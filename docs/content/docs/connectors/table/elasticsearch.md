@@ -283,6 +283,28 @@ Connector Options
       <td>String</td>
       <td>Elasticsearch connector supports to specify a format. The format must produce a valid json document.
        By default uses built-in <code>'json'</code> format. Please refer to <a href="{{< ref "docs/connectors/table/formats/overview" >}}">JSON Format</a> page for more details.
+       The document body is produced by this format, so nested <code>ROW</code>, <code>ARRAY</code> and <code>MAP</code> columns
+       and the format options (for example <code>'json.timestamp-format.standard'</code>) behave like in other table sinks.
+      </td>
+    </tr>
+    <tr>
+      <td><h5>sink.flush-on-checkpoint</h5></td>
+      <td>optional</td>
+      <td>yes</td>
+      <td style="word-wrap: break-word;">true</td>
+      <td>Boolean</td>
+      <td>Accepted for compatibility with the legacy <code>SinkFunction</code> based connectors. The sink always flushes
+       buffered actions on checkpoint; <code>'false'</code> is ignored with a warning.
+      </td>
+    </tr>
+    <tr>
+      <td><h5>sink.bulk-flush.backoff.strategy</h5><br><h5>sink.bulk-flush.backoff.max-retries</h5><br><h5>sink.bulk-flush.backoff.delay</h5></td>
+      <td>optional</td>
+      <td>yes</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>String<br>Integer<br>Duration</td>
+      <td>Accepted for compatibility with the legacy connectors and ignored with a warning. Failed bulk items are retried by the
+       sink itself.
       </td>
     </tr>
     </tbody>

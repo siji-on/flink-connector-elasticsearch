@@ -29,8 +29,9 @@
   - FLINK-39798 `flink-sql-connector-elasticsearch8` uber jar 모듈 신설
   - FLINK-39816 uber jar 에 parsson 포함
 - 포크 자체 커밋: 위 cherry-pick 을 v4.0 레이아웃에 맞춘 hotfix, CI 매트릭스(2.1.3), `publish.yml`
-- 포크 자체 기능: Table/SQL sink 옵션 `sink.delete-strategy` (아래 참고), `sink.bulk-flush.max-in-flight-actions` 가
+- 포크 자체 기능 (bp1): Table/SQL sink 옵션 `sink.delete-strategy` (아래 참고), `sink.bulk-flush.max-in-flight-actions` 가
   실제로 sink 에 전달되도록 수정 (업스트림은 옵션을 읽기만 하고 builder 에 넘기지 않아 항상 기본값 50 이었다)
+- 포크 자체 기능 (bp2): SQL sink 가 문서를 **table format(json) 으로 직렬화**하도록 수정, 레거시 커넥터 DDL 옵션 수용 (아래 참고)
 
 업스트림이 2.1 용 릴리즈를 내면 이 포크는 폐기한다. 포크 자체 기능은 그때 업스트림에 PR 로 올리거나 버린다.
 
@@ -55,6 +56,36 @@ Alibaba 커넥터의 같은 이름 옵션과 값·의미를 맞췄다(jar `1.17-
 나머지 전략은 기존과 같은 `SinkV2Provider` 다.
 
 **DataStream API 에는 이 옵션이 없다.** `sinkTo` 앞에서 직접 `filter` 하거나 `ElementConverter` 안에서 분기한다.
+
+## SQL 문서 직렬화 — `format` 을 실제로 쓴다 (bp2)
+
+업스트림 ES8 SQL sink 는 `'format' = 'json'` 을 옵션으로 받기만 하고 문서는 `RowData → Map → Jackson` 으로 직접
+만든다. 그 결과 Alibaba(레거시) 커넥터와 출력이 달라지고, 일부는 데이터가 깨진다 (같은 행을 두 방식으로 돌려 확인):
+
+| 컬럼 타입 | json format (Alibaba) | 업스트림 ES8 SQL sink |
+| --- | --- | --- |
+| `ROW<code, qty>` / `ARRAY<ROW<...>>` | `{"code":"A","qty":2}` | `{"kind":"INSERT","arity":2}` — **데이터 유실** |
+| `TIMESTAMP(3)` | `2012-12-12T12:12:12.123` (ISO 설정 시) | `2012-12-12 12:12:12` — 밀리초 유실, `json.timestamp-format.standard` 무시 |
+| `TIMESTAMP_LTZ(3)` | `2012-12-12T12:12:12.123Z` | `1355314332.123` (숫자) |
+| `DECIMAL`, `MAP`, `ARRAY<FLOAT>` | 정상 | 정상 |
+
+bp2 부터 `RowDataElementConverter` 가 팩토리에서 발견한 format 의 `SerializationSchema` 로 행을 JSON 으로 만들고,
+그 JSON 을 문서로 보낸다(`DECIMAL` 은 `BigDecimal` 로 다시 읽어 정밀도를 유지). 따라서 cdoc 의 기존 ES DDL 에 있는
+`ARRAY<ROW<...>>`, `MAP<STRING, BIGINT>`, `'json.timestamp-format.standard' = 'ISO-8601'` 이 Alibaba 때와 같은 문서를 만든다.
+
+## 레거시 DDL 옵션 호환 (bp2)
+
+cdoc 의 ES DDL 이 쓰는 옵션 중 새 sink 에 대응이 없는 것은 **받아서 무시**한다 (경고 로그 1회). DDL 을 고치지 않고
+커넥터 jar 만 바꿔 올릴 수 있게 하기 위해서다.
+
+| 옵션 | 처리 |
+| --- | --- |
+| `sink.flush-on-checkpoint` | AsyncSink 는 항상 checkpoint 에서 flush 한다. `false` 는 무시 |
+| `sink.bulk-flush.backoff.strategy` / `.delay` / `.max-retries` | 무시. 실패 항목은 sink 가 자체 재시도 (아래 poison pill 참고) |
+
+`format`, `json.*`, `sink.delete-strategy`, `sink.bulk-flush.max-actions` / `max-size` / `interval`(`'3000'` 같은 단위 없는
+값은 ms), `document-id.key-delimiter`, `hosts`, `index`, `username`, `password` 는 이름·의미가 같다. Alibaba 의
+`failure-handler`, `retry-on-conflict`, `document-type` 은 지원하지 않는다 (DDL 검증 실패).
 
 ## 빌드
 
@@ -88,7 +119,10 @@ Flink 는 `org.apache.flink.` 패키지를 **parent-first** 로 로드한다. �
 - **SQL 잡**: 이미지(`packages-flink-2.1.list`) 에 uber jar 를 넣고 `'connector' = 'elasticsearch-8'` 로 쓴다.
 - 둘 다 필요해지면 DataStream 쪽을 SQL(`toChangelogStream` 대신 `INSERT INTO`) 로 옮기는 쪽이 안전하다.
 
-## index-ads 마이그레이션 (Alibaba 커넥터 → 이 커넥터)
+## DataStream 잡 마이그레이션 (Alibaba 커넥터 → 이 커넥터)
+
+> index-ads 는 DataStream 코드를 옮기지 않고 **SQL 잡으로 다시 만든다** (2026-10 결정). 그러면 위의 SQL uber jar 와
+> `sink.delete-strategy` 경로를 탄다. 아래는 다른 DataStream 잡이 생길 때를 위한 참고다.
 
 `cdoc/flink-application/search/index-ads` 의 `AdsEsSinkFunction` 은 `ElasticsearchSinkFunction` + HLRC
 `UpdateRequest.docAsUpsert` 를 쓴다. 새 API 에서는 `ElementConverter` 가 ES Java client 의
@@ -153,10 +187,23 @@ poison pill 이 운영상 문제가 되면 `Elasticsearch8AsyncWriter#handlePart
 
 | 위치 | 인증 | 용도 |
 | --- | --- | --- |
-| GitHub Release `https://github.com/siji-on/flink-connector-elasticsearch/releases/download/<tag>/<artifact>-<ver>.jar` | 없음 | cdoc 에서 받을 때 이걸 쓴다 |
+| GitHub Release `https://github.com/siji-on/flink-connector-elasticsearch/releases/download/<tag>/<artifact>-<ver>.jar` | 없음 | Gradle ivy 저장소, 수동 다운로드 |
 | 이 저장소의 GitHub Packages (`maven.pkg.github.com/siji-on/flink-connector-elasticsearch`) | `read:packages` 토큰 | 로컬 Maven/Gradle 에서 편할 때 |
+| `bucketplace/cdoc` 의 GitHub Packages (`maven.pkg.github.com/bucketplace/cdoc`) | 저장소 시크릿 `CDOC_PACKAGES_TOKEN` 이 있을 때만 | **flink-app 이미지가 받는 곳.** `packages-flink-2.1.list` 에 `org.apache.flink:flink-sql-connector-elasticsearch8:<ver>` 한 줄 |
 
-cdoc 의 Actions `GITHUB_TOKEN` 은 org 밖(개인 계정) 패키지를 읽지 못하므로 Packages 쪽은 cdoc 빌드에서 쓰지 않는다.
+cdoc 의 flink-app 이미지(`cdoc-image/flink-app/download-packages.sh`)는 Maven 좌표를 Central(또는 사내 Nexus)과
+`maven.pkg.github.com/bucketplace/cdoc` 에서만 받는다. 그래서 publish workflow 가 `bucketplace/cdoc` Packages 에도
+배포한다. 이 단계는 시크릿 `CDOC_PACKAGES_TOKEN` 이 설정돼 있을 때만 돌고, 토큰은 그 단계의 환경 변수로만 전달된다.
+
+- 토큰: `bucketplace/cdoc` 에 **Packages: write** 만 가진 fine-grained PAT (만료 90일 이하 권장). fine-grained PAT 로
+  Packages 업로드가 거부되면 classic PAT `write:packages` 가 필요한데, 이건 `repo` 스코프까지 요구하므로 권한이 넓다.
+  그 경우 반대로 cdoc 저장소 쪽에 "Release 에서 jar 를 받아 자기 Packages 에 올리는" workflow 를 두는 편이 안전하다
+  (cdoc 의 `GITHUB_TOKEN` 은 자기 저장소 Packages 에 쓸 수 있어 PAT 이 필요 없다).
+- 노출 경로: Actions 시크릿은 로그에서 마스킹되고, 포크 PR 의 `pull_request` 트리거에는 전달되지 않는다. publish 는
+  태그 push 와 수동 실행에서만 돌고 둘 다 저장소 쓰기 권한이 있어야 하므로 외부인이 이 단계를 트리거할 수 없다.
+  남는 위험은 빌드 중 실행되는 Maven 플러그인/의존성이 토큰을 빼가는 공급망 공격뿐이고, 그래서 권한을 Packages write
+  하나로 줄이고 만료를 짧게 둔다.
+
 Gradle 에서 토큰 없이 받으려면 Release 다운로드 URL 을 ivy 패턴 저장소로 잡는다:
 
 ```kotlin
@@ -169,7 +216,7 @@ repositories {
     }
 }
 dependencies {
-    implementation("org.apache.flink:flink-connector-elasticsearch8:4.0.1-bp1-2.1")
+    implementation("org.apache.flink:flink-connector-elasticsearch8:4.0.1-bp2-2.1")
 }
 ```
 
@@ -180,4 +227,4 @@ dependencies {
 이들은 Maven Central 에 pom 이 있으므로 그 아래 전이 의존성(rest client, httpasyncclient, jakarta.json 등)은 따라온다.
 
 버전 규칙은 업스트림과 같이 `<connector>-<flink>` 이고, 업스트림 릴리즈와 구분하기 위해 `bp<N>` 을 끼운다:
-`4.0.1-bp1-2.1`.
+`4.0.1-bp2-2.1`.
