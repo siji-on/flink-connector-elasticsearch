@@ -433,7 +433,7 @@ class Elasticsearch8DynamicSinkITCase extends Elasticsearch8DynamicSinkBaseITCas
     @TestTemplate
     public void testNestedRowsAndTimestampFormatAreWrittenByTheFormat() throws Exception {
         // ROW / ARRAY<ROW> columns and json.* options only work when the document is produced by
-        // the table format (the Alibaba / legacy connectors behaved like this, cdoc DDLs rely on it)
+        // the table format (the legacy connectors behaved like this and existing DDLs rely on it)
         TableEnvironment tableEnvironment =
                 TableEnvironment.create(EnvironmentSettings.inStreamingMode());
         String index = "nested-rows-iso-timestamps";

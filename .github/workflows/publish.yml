@@ -7,8 +7,8 @@
 #   2. on tag builds, the jars are attached to a GitHub Release of the same name, which can
 #      be downloaded without any token:
 #      https://github.com/<owner>/<repo>/releases/download/<tag>/<artifact>-<version>.jar
-#      The cdoc flink-app image pulls the SQL uber jar from this URL (pinned by sha256) at
-#      image build time, so nothing is pushed into cdoc from here.
+#      Downstream images pull the jars from this URL (pinned by sha256) at build time;
+#      nothing is pushed anywhere else from here.
 #
 # Trigger: push a tag `v<connector>-<flink>` (e.g. v4.0.1-bp2-2.1) or run manually.
 # The pom version is the source of truth for the artifact version; the tag is only
