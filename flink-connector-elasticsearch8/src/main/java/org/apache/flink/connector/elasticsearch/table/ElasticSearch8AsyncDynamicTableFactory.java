@@ -49,7 +49,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.apache.flink.connector.elasticsearch.utils.StringUtils.capitalizeFirst;
+import static org.apache.commons.lang3.StringUtils.capitalize;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.BULK_FLUSH_INTERVAL_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.BULK_FLUSH_MAX_ACTIONS_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.BULK_FLUSH_MAX_BUFFERED_ACTIONS_OPTION;
@@ -103,7 +103,7 @@ public class ElasticSearch8AsyncDynamicTableFactory extends AsyncDynamicTableSin
                 .setPrimaryKeyLogicalTypesWithIndex(primaryKeyLogicalTypesWithIndex)
                 .setPhysicalRowDataType(context.getPhysicalRowDataType())
                 .setLocalTimeZoneId(getLocalTimeZoneId(context.getConfiguration()))
-                .setSummaryString(capitalizeFirst(IDENTIFIER))
+                .setSummaryString(capitalize(IDENTIFIER))
                 .build();
     }
 
