@@ -58,6 +58,7 @@ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8Conne
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.CONNECTION_PATH_PREFIX_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.CONNECTION_REQUEST_TIMEOUT;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.CONNECTION_TIMEOUT;
+import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.DELETE_STRATEGY_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.DELIVERY_GUARANTEE_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.FORMAT_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.HOSTS_OPTION;
@@ -94,6 +95,15 @@ public class ElasticSearch8AsyncDynamicTableFactory extends AsyncDynamicTableSin
         Elasticsearch8Configuration config = getConfiguration(helper);
         helper.validate();
         validateConfiguration(config);
+        validate(
+                config.getDeleteStrategy()
+                                != Elasticsearch8ConnectorOptions.DeleteStrategy
+                                        .NON_PK_FIELD_TO_NULL
+                        || !primaryKeyLogicalTypesWithIndex.isEmpty(),
+                () ->
+                        String.format(
+                                "'%s' = '%s' requires a primary key.",
+                                DELETE_STRATEGY_OPTION.key(), config.getDeleteStrategy()));
 
         ElasticSearch8AsyncDynamicSink.ElasticSearch8AsyncDynamicSinkBuilder builder =
                 new ElasticSearch8AsyncDynamicSink.ElasticSearch8AsyncDynamicSinkBuilder();
@@ -213,6 +223,7 @@ public class ElasticSearch8AsyncDynamicTableFactory extends AsyncDynamicTableSin
                         SSL_CERTIFICATE_FINGERPRINT,
                         FORMAT_OPTION,
                         DELIVERY_GUARANTEE_OPTION,
+                        DELETE_STRATEGY_OPTION,
                         PASSWORD_OPTION,
                         USERNAME_OPTION,
                         SINK_PARALLELISM,
@@ -242,7 +253,8 @@ public class ElasticSearch8AsyncDynamicTableFactory extends AsyncDynamicTableSin
                         CONNECTION_REQUEST_TIMEOUT,
                         CONNECTION_TIMEOUT,
                         SOCKET_TIMEOUT,
-                        SSL_CERTIFICATE_FINGERPRINT)
+                        SSL_CERTIFICATE_FINGERPRINT,
+                        DELETE_STRATEGY_OPTION)
                 .collect(Collectors.toSet());
     }
 }

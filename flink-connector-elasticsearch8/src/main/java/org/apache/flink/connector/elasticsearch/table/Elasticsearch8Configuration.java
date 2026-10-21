@@ -42,6 +42,7 @@ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8Conne
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.CONNECTION_PATH_PREFIX_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.CONNECTION_REQUEST_TIMEOUT;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.CONNECTION_TIMEOUT;
+import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.DELETE_STRATEGY_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.DELIVERY_GUARANTEE_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.HOSTS_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.INDEX_OPTION;
@@ -84,6 +85,10 @@ public class Elasticsearch8Configuration {
 
     public DeliveryGuarantee getDeliveryGuarantee() {
         return config.get(DELIVERY_GUARANTEE_OPTION);
+    }
+
+    public Elasticsearch8ConnectorOptions.DeleteStrategy getDeleteStrategy() {
+        return config.get(DELETE_STRATEGY_OPTION);
     }
 
     public Optional<String> getUsername() {

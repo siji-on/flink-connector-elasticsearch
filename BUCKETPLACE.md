@@ -29,8 +29,32 @@
   - FLINK-39798 `flink-sql-connector-elasticsearch8` uber jar 모듈 신설
   - FLINK-39816 uber jar 에 parsson 포함
 - 포크 자체 커밋: 위 cherry-pick 을 v4.0 레이아웃에 맞춘 hotfix, CI 매트릭스(2.1.3), `publish.yml`
+- 포크 자체 기능: Table/SQL sink 옵션 `sink.delete-strategy` (아래 참고), `sink.bulk-flush.max-in-flight-actions` 가
+  실제로 sink 에 전달되도록 수정 (업스트림은 옵션을 읽기만 하고 builder 에 넘기지 않아 항상 기본값 50 이었다)
 
-업스트림이 2.1 용 릴리즈를 내면 이 포크는 폐기한다.
+업스트림이 2.1 용 릴리즈를 내면 이 포크는 폐기한다. 포크 자체 기능은 그때 업스트림에 PR 로 올리거나 버린다.
+
+## `sink.delete-strategy` — Alibaba 커넥터 호환 삭제 전략
+
+Alibaba 커넥터의 같은 이름 옵션과 값·의미를 맞췄다(jar `1.17-vvr-8.0.11-4` 의 `RowElasticsearchSinkFunction`
+바이트코드로 확인). 기존 DDL 의 `'sink.delete-strategy' = 'IGNORE_DELETE'` 를 그대로 옮기면 된다.
+
+| 값 | `-U` (UPDATE_BEFORE) | `-D` (DELETE) |
+| --- | --- | --- |
+| `DELETE_ROW_ON_PK` (기본) | 무시 | 문서 삭제 |
+| `IGNORE_DELETE` | 무시 | 무시 — 문서는 절대 지워지지 않는다 |
+| `NON_PK_FIELD_TO_NULL` | 무시 | 문서는 남기고 PK 외 필드를 `null` 로 partial update (`doc_as_upsert`) |
+| `CHANGELOG_STANDARD` | 문서 삭제 | 문서 삭제 |
+
+`+I` 는 항상 index(덮어쓰기), `+U` 는 항상 partial update + `doc_as_upsert` 다. Alibaba 의 `ignore-retract`
+(deprecated) 는 옮기지 않았다 — `CHANGELOG_STANDARD` 가 `ignore-retract=false` 에 해당한다.
+
+구현 메모: Flink 의 `ChangelogMode` 로는 `-U` 만 거부할 수 있고 `-D` 는 거부할 수 없으며, AsyncSink 의
+`ElementConverter` 는 레코드당 요청 하나를 반드시 만들어야 한다. 그래서 `IGNORE_DELETE` 일 때만 sink 앞에
+`filter` 연산자를 끼운 `DataStreamSinkProvider` 를 돌려준다(`ElasticSearch8AsyncDynamicSink.RowKindFilteringSinkProvider`).
+나머지 전략은 기존과 같은 `SinkV2Provider` 다.
+
+**DataStream API 에는 이 옵션이 없다.** `sinkTo` 앞에서 직접 `filter` 하거나 `ElementConverter` 안에서 분기한다.
 
 ## 빌드
 
@@ -110,6 +134,7 @@ compileOnly("org.apache.flink:flink-streaming-java:2.1.3")
 | 항목 | Alibaba (SinkFunction) | 이 커넥터 (AsyncSink) |
 | --- | --- | --- |
 | null 레코드 | `process()` 에서 skip | `ElementConverter` 가 null 을 돌려주면 안 된다 → sink 앞 `filter { it != null }` |
+| 삭제 전략 (SQL) | `sink.delete-strategy` | 동일 옵션·동일 값 (이 포크에서 추가) |
 | 벌크 재시도 | `setBulkFlushBackoff*` 로 횟수 제한(6회), 그 뒤 `ActionRequestFailureHandler` 가 결정 | 실패 항목은 **무기한 재시도**. 매핑 오류 같은 영구 실패 문서가 있으면 그 서브태스크가 계속 재시도한다 (poison pill) |
 | 실패 핸들러 | `ConnectionClosedException` 만 재적재, 나머지는 로그 후 **유실** | 실패 핸들러 훅 없음. 메트릭 `numRecordsSendPartialFailure`, `numRecordsOutErrors` 로 감시 |
 | 전달 보장 | at-least-once | at-least-once (checkpoint 시 flush) |

@@ -31,6 +31,7 @@ import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTe
 import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 
 import co.elastic.clients.elasticsearch.ElasticsearchAsyncClient;
+import co.elastic.clients.elasticsearch.core.ExistsRequest;
 import co.elastic.clients.elasticsearch.core.GetRequest;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.transport.TransportUtils;
@@ -182,6 +183,13 @@ abstract class Elasticsearch8DynamicSinkBaseITCase {
                 client.get(new GetRequest.Builder().index(index).id(id).build(), Map.class)
                         .get()
                         .source();
+    }
+
+    boolean documentExists(String index, String id)
+            throws ExecutionException, InterruptedException {
+        return client.exists(new ExistsRequest.Builder().index(index).id(id).build())
+                .get()
+                .value();
     }
 
     @SuppressWarnings({"unchecked"})

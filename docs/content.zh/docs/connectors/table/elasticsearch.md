@@ -195,6 +195,20 @@ CREATE TABLE myUserTable (
       <td>允许的最大 in flight 请求数。注意此配置项仅<code>elasticsearch-8</code>支持。</td>
     </tr>
     <tr>
+      <td><h5>sink.delete-strategy</h5></td>
+      <td>可选</td>
+      <td style="word-wrap: break-word;">DELETE_ROW_ON_PK</td>
+      <td>String</td>
+      <td>回撤消息（<code>UPDATE_BEFORE</code> / <code>DELETE</code>）如何写入 Elasticsearch。可选值：
+      <ul>
+        <li><code>DELETE_ROW_ON_PK</code>：忽略 <code>UPDATE_BEFORE</code>，收到 <code>DELETE</code> 时按主键删除文档。</li>
+        <li><code>IGNORE_DELETE</code>：忽略 <code>UPDATE_BEFORE</code> 和 <code>DELETE</code>，文档永远不会被删除。</li>
+        <li><code>NON_PK_FIELD_TO_NULL</code>：忽略 <code>UPDATE_BEFORE</code>，收到 <code>DELETE</code> 时保留文档并把所有非主键字段置为 <code>null</code>。需要定义主键。</li>
+        <li><code>CHANGELOG_STANDARD</code>：严格按照 changelog 语义，<code>UPDATE_BEFORE</code> 和 <code>DELETE</code> 都删除文档。</li>
+      </ul>
+      注意此配置项仅<code>elasticsearch-8</code>支持。</td>
+    </tr>
+    <tr>
       <td><h5>sink.bulk-flush.backoff.strategy</h5></td>
       <td>可选</td>
       <td style="word-wrap: break-word;">DISABLED</td>
@@ -263,6 +277,14 @@ Elasticsearch 连接器通过使用 `document-id.key-delimiter` 指定的键分�
 如果未指定主键，Elasticsearch 将自动生成文档 id。
 
 有关 PRIMARY KEY 语法的更多详细信息，请参见 [CREATE TABLE DDL]({{< ref "docs/dev/table/sql/create" >}}#create-table)。
+
+### 删除策略
+
+在 upsert 模式下，`elasticsearch-8` 连接器通过 `sink.delete-strategy` 决定回撤消息对文档的影响。
+默认值 `DELETE_ROW_ON_PK` 在收到 `DELETE` 时删除文档并忽略 `UPDATE_BEFORE`（随后的 `UPDATE_AFTER` 会覆盖文档）。
+如果文档不应被上游的回撤删除（例如 join / 聚合会先回撤再重新下发），使用 `IGNORE_DELETE`；
+`NON_PK_FIELD_TO_NULL` 保留文档但把非主键字段置为 `null`；`CHANGELOG_STANDARD` 则在 `UPDATE_BEFORE` 时也删除文档。
+该选项只影响回撤消息，`INSERT` 始终执行 index，`UPDATE_AFTER` 始终执行 upsert。
 
 ### 动态索引
 

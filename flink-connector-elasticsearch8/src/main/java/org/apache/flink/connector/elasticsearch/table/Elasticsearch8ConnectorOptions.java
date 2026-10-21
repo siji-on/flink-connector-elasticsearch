@@ -24,11 +24,16 @@ package org.apache.flink.connector.elasticsearch.table;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
+import org.apache.flink.configuration.DescribedEnum;
 import org.apache.flink.configuration.MemorySize;
+import org.apache.flink.configuration.description.InlineElement;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.types.RowKind;
 
 import java.time.Duration;
 import java.util.List;
+
+import static org.apache.flink.configuration.description.TextElement.text;
 
 /**
  * Base options for the Elasticsearch connector. Needs to be public so that the {@link
@@ -149,4 +154,73 @@ public class Elasticsearch8ConnectorOptions {
                     .enumType(DeliveryGuarantee.class)
                     .defaultValue(DeliveryGuarantee.AT_LEAST_ONCE)
                     .withDescription("Optional delivery guarantee when committing.");
+
+    public static final ConfigOption<DeleteStrategy> DELETE_STRATEGY_OPTION =
+            ConfigOptions.key("sink.delete-strategy")
+                    .enumType(DeleteStrategy.class)
+                    .defaultValue(DeleteStrategy.DELETE_ROW_ON_PK)
+                    .withDescription(
+                            "How retraction rows (UPDATE_BEFORE and DELETE) are written to Elasticsearch.");
+
+    /**
+     * Strategy for handling retraction rows (UPDATE_BEFORE / DELETE).
+     *
+     * <p>The names and semantics follow the {@code sink.delete-strategy} option of the Alibaba
+     * Ververica Elasticsearch connector so that existing table definitions can be migrated
+     * unchanged.
+     */
+    @PublicEvolving
+    public enum DeleteStrategy implements DescribedEnum {
+        IGNORE_DELETE(
+                true,
+                true,
+                "Drop UPDATE_BEFORE and DELETE rows. Documents are never deleted from Elasticsearch."),
+        DELETE_ROW_ON_PK(
+                true,
+                false,
+                "Drop UPDATE_BEFORE rows and delete the document identified by the primary key on DELETE rows."),
+        NON_PK_FIELD_TO_NULL(
+                true,
+                false,
+                "Drop UPDATE_BEFORE rows. On DELETE rows keep the document and set every non primary key field to null."),
+        CHANGELOG_STANDARD(
+                false,
+                false,
+                "Follow the changelog literally: delete the document on both UPDATE_BEFORE and DELETE rows.");
+
+        private final boolean ignoreUpdateBefore;
+        private final boolean ignoreDelete;
+        private final String description;
+
+        DeleteStrategy(boolean ignoreUpdateBefore, boolean ignoreDelete, String description) {
+            this.ignoreUpdateBefore = ignoreUpdateBefore;
+            this.ignoreDelete = ignoreDelete;
+            this.description = description;
+        }
+
+        public boolean isIgnoreUpdateBefore() {
+            return ignoreUpdateBefore;
+        }
+
+        public boolean isIgnoreDelete() {
+            return ignoreDelete;
+        }
+
+        /** Whether rows of the given kind are dropped before they reach Elasticsearch. */
+        public boolean ignores(RowKind kind) {
+            switch (kind) {
+                case UPDATE_BEFORE:
+                    return ignoreUpdateBefore;
+                case DELETE:
+                    return ignoreDelete;
+                default:
+                    return false;
+            }
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
 }

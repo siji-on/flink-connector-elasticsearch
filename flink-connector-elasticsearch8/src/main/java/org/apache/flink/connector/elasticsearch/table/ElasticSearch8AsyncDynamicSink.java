@@ -22,14 +22,22 @@
 package org.apache.flink.connector.elasticsearch.table;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.connector.base.table.sink.AsyncDynamicTableSink;
 import org.apache.flink.connector.base.table.sink.AsyncDynamicTableSinkBuilder;
+import org.apache.flink.connector.elasticsearch.sink.Elasticsearch8AsyncSink;
 import org.apache.flink.connector.elasticsearch.sink.Elasticsearch8AsyncSinkBuilder;
 import org.apache.flink.connector.elasticsearch.sink.Operation;
+import org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.DeleteStrategy;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.DataStreamSink;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.connector.ChangelogMode;
+import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.connector.format.EncodingFormat;
+import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.SinkV2Provider;
 import org.apache.flink.table.data.RowData;
@@ -39,10 +47,15 @@ import org.apache.flink.util.StringUtils;
 
 import org.apache.http.HttpHost;
 
+import javax.annotation.Nullable;
+
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -98,16 +111,27 @@ public class ElasticSearch8AsyncDynamicSink extends AsyncDynamicTableSink<Operat
                 localTimeZoneId);
     }
 
+    Set<String> primaryKeyFieldNames() {
+        List<String> fieldNames = DataType.getFieldNames(physicalRowDataType);
+        return primaryKeyLogicalTypesWithIndex.stream()
+                .map(pk -> fieldNames.get(pk.index))
+                .collect(Collectors.toSet());
+    }
+
     @Override
     public ChangelogMode getChangelogMode(ChangelogMode requestedMode) {
+        DeleteStrategy deleteStrategy = config.getDeleteStrategy();
         ChangelogMode.Builder builder = ChangelogMode.newBuilder();
         boolean hasUpdateOrDelete = false;
         for (RowKind kind : requestedMode.getContainedKinds()) {
-            if (kind != RowKind.UPDATE_BEFORE) {
-                builder.addContainedKind(kind);
-                if (kind == RowKind.UPDATE_AFTER || kind == RowKind.DELETE) {
-                    hasUpdateOrDelete = true;
-                }
+            if (kind == RowKind.UPDATE_BEFORE && deleteStrategy.isIgnoreUpdateBefore()) {
+                // UPDATE_BEFORE is dropped at the planner level; DELETE (if ignored) is dropped in
+                // front of the sink because the planner does not allow to refuse it.
+                continue;
+            }
+            builder.addContainedKind(kind);
+            if (kind != RowKind.INSERT) {
+                hasUpdateOrDelete = true;
             }
         }
         if (isDynamicIndexWithSystemTime && !requestedMode.containsOnly(RowKind.INSERT)) {
@@ -123,16 +147,22 @@ public class ElasticSearch8AsyncDynamicSink extends AsyncDynamicTableSink<Operat
 
     @Override
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
+        DeleteStrategy deleteStrategy = config.getDeleteStrategy();
         Elasticsearch8AsyncSinkBuilder<RowData> builder = new Elasticsearch8AsyncSinkBuilder<>();
 
         builder.setHosts(config.getHosts().toArray(new HttpHost[0]));
         builder.setMaxBatchSize(config.getBulkFlushMaxActions());
         builder.setMaxBufferedRequests(config.getBulkFlushMaxBufferedActions());
+        builder.setMaxInFlightRequests(config.getBulkFlushMaxInFlightActions());
         builder.setMaxBatchSizeInBytes(config.getBulkFlushMaxByteSize().getBytes());
         builder.setMaxTimeInBufferMS(config.getBulkFlushInterval());
         builder.setElementConverter(
                 new RowDataElementConverter(
-                        physicalRowDataType, createIndexGenerator(), createKeyExtractor()));
+                        physicalRowDataType,
+                        createIndexGenerator(),
+                        createKeyExtractor(),
+                        deleteStrategy,
+                        primaryKeyFieldNames()));
 
         config.getUsername()
                 .filter(username -> !StringUtils.isNullOrWhitespaceOnly(username))
@@ -160,7 +190,12 @@ public class ElasticSearch8AsyncDynamicSink extends AsyncDynamicTableSink<Operat
 
         config.getCertificateFingerprint().ifPresent(builder::setCertificateFingerprint);
 
-        return SinkV2Provider.of(builder.build(), config.getParallelism().orElse(null));
+        Elasticsearch8AsyncSink<RowData> sink = builder.build();
+        Integer parallelism = config.getParallelism().orElse(null);
+        if (deleteStrategy.isIgnoreDelete()) {
+            return new RowKindFilteringSinkProvider(sink, deleteStrategy, parallelism);
+        }
+        return SinkV2Provider.of(sink, parallelism);
     }
 
     @Override
@@ -210,6 +245,75 @@ public class ElasticSearch8AsyncDynamicSink extends AsyncDynamicTableSink<Operat
                 config,
                 summaryString,
                 localTimeZoneId);
+    }
+
+    /**
+     * {@link DataStreamSinkProvider} that drops the row kinds ignored by the configured {@link
+     * DeleteStrategy} before the rows reach the sink.
+     *
+     * <p>A {@link ChangelogMode} can only refuse UPDATE_BEFORE; a sink that is asked to consume
+     * DELETE rows must accept them. The {@link org.apache.flink.connector.base.sink.AsyncSinkBase}
+     * element converter in turn must produce exactly one request per record, so the only place to
+     * skip a row is in front of the sink.
+     */
+    @Internal
+    static class RowKindFilteringSinkProvider implements DataStreamSinkProvider {
+        private final Elasticsearch8AsyncSink<RowData> sink;
+        private final DeleteStrategy deleteStrategy;
+        @Nullable private final Integer parallelism;
+
+        RowKindFilteringSinkProvider(
+                Elasticsearch8AsyncSink<RowData> sink,
+                DeleteStrategy deleteStrategy,
+                @Nullable Integer parallelism) {
+            this.sink = checkNotNull(sink);
+            this.deleteStrategy = checkNotNull(deleteStrategy);
+            this.parallelism = parallelism;
+        }
+
+        @Override
+        public DataStreamSink<?> consumeDataStream(
+                ProviderContext providerContext, DataStream<RowData> dataStream) {
+            // Mirror what the planner does for a SinkV2Provider: the sink runs with the configured
+            // parallelism, or with the parallelism of its input if none is configured.
+            int sinkParallelism = parallelism != null ? parallelism : dataStream.getParallelism();
+
+            SingleOutputStreamOperator<RowData> filtered =
+                    dataStream
+                            .filter(new IgnoredRowKindFilter(deleteStrategy))
+                            .setParallelism(sinkParallelism)
+                            .name("DropIgnoredRowKinds[" + deleteStrategy + "]");
+            providerContext
+                    .generateUid("elasticsearch8-drop-ignored-row-kinds")
+                    .ifPresent(filtered::uid);
+
+            DataStreamSink<RowData> dataStreamSink =
+                    filtered.sinkTo(sink).setParallelism(sinkParallelism);
+            providerContext.generateUid("elasticsearch8-sink").ifPresent(dataStreamSink::uid);
+            return dataStreamSink;
+        }
+
+        @Override
+        public Optional<Integer> getParallelism() {
+            return Optional.ofNullable(parallelism);
+        }
+    }
+
+    /** Filters out the row kinds ignored by a {@link DeleteStrategy}. */
+    @Internal
+    static class IgnoredRowKindFilter implements FilterFunction<RowData> {
+        private static final long serialVersionUID = 1L;
+
+        private final DeleteStrategy deleteStrategy;
+
+        IgnoredRowKindFilter(DeleteStrategy deleteStrategy) {
+            this.deleteStrategy = deleteStrategy;
+        }
+
+        @Override
+        public boolean filter(RowData row) {
+            return !deleteStrategy.ignores(row.getRowKind());
+        }
     }
 
     /** Builder class for {@link ElasticSearch8AsyncDynamicSink}. */
