@@ -173,9 +173,11 @@ dependencies {
 }
 ```
 
-`metadataSources { artifact() }` 라 pom 이 없고, 따라서 **전이 의존성이 따라오지 않는다.** 커넥터가 필요한
-`co.elastic.clients:elasticsearch-java:8.12.1` 과 `org.apache.httpcomponents:httpasyncclient` 는 잡 쪽에서 직접
-`implementation` 으로 적는다 (업스트림 `flink-connector-elasticsearch8/pom.xml` 의 compile 의존성 참고).
+`metadataSources { artifact() }` 라 pom 이 없고, 따라서 **전이 의존성이 따라오지 않는다.** 커넥터의 compile
+의존성(`flink-connector-elasticsearch8/pom.xml`)을 잡 쪽에서 직접 `implementation` 으로 적는다:
+`org.apache.flink:flink-connector-base:2.1.3`, `co.elastic.clients:elasticsearch-java:8.12.1`,
+`com.fasterxml.jackson.core:jackson-databind`, `com.fasterxml.jackson.datatype:jackson-datatype-jsr310`.
+이들은 Maven Central 에 pom 이 있으므로 그 아래 전이 의존성(rest client, httpasyncclient, jakarta.json 등)은 따라온다.
 
 버전 규칙은 업스트림과 같이 `<connector>-<flink>` 이고, 업스트림 릴리즈와 구분하기 위해 `bp<N>` 을 끼운다:
 `4.0.1-bp1-2.1`.
