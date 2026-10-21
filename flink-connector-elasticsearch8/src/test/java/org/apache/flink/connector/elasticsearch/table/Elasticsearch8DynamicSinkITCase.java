@@ -23,6 +23,8 @@ package org.apache.flink.connector.elasticsearch.table;
 
 import org.apache.flink.api.common.time.Deadline;
 import org.apache.flink.api.connector.sink2.Sink;
+import org.apache.flink.configuration.CoreOptions;
+import org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.DeleteStrategy;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.EnvironmentSettings;
@@ -38,6 +40,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
 import org.apache.flink.types.Row;
@@ -45,6 +48,8 @@ import org.apache.flink.types.RowKind;
 
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
+
+import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.time.LocalDate;
@@ -59,6 +64,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.DELETE_STRATEGY_OPTION;
 import static org.apache.flink.table.api.Expressions.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
@@ -85,7 +91,7 @@ class Elasticsearch8DynamicSinkITCase extends Elasticsearch8DynamicSinkBaseITCas
         GenericRowData rowData =
                 GenericRowData.of(
                         1L,
-                        12345,
+                        12000,
                         StringData.fromString("ABCDE"),
                         12.12f,
                         (byte) 2,
@@ -152,7 +158,7 @@ class Elasticsearch8DynamicSinkITCase extends Elasticsearch8DynamicSinkBaseITCas
                 .fromValues(
                         row(
                                 1L,
-                                LocalTime.ofNanoOfDay(12345L * 1_000_000L),
+                                LocalTime.ofNanoOfDay(12000L * 1_000_000L),
                                 "ABCDE",
                                 12.12f,
                                 (byte) 2,
@@ -197,7 +203,7 @@ class Elasticsearch8DynamicSinkITCase extends Elasticsearch8DynamicSinkBaseITCas
                 .fromValues(
                         row(
                                 1L,
-                                LocalTime.ofNanoOfDay(12345L * 1_000_000L),
+                                LocalTime.ofNanoOfDay(12000L * 1_000_000L),
                                 "ABCDE",
                                 12.12f,
                                 (byte) 2,
@@ -205,7 +211,7 @@ class Elasticsearch8DynamicSinkITCase extends Elasticsearch8DynamicSinkBaseITCas
                                 LocalDateTime.parse("2012-12-12T12:12:12")),
                         row(
                                 2L,
-                                LocalTime.ofNanoOfDay(12345L * 1_000_000L),
+                                LocalTime.ofNanoOfDay(12000L * 1_000_000L),
                                 "FGHIJK",
                                 13.13f,
                                 (byte) 4,
@@ -326,6 +332,154 @@ class Elasticsearch8DynamicSinkITCase extends Elasticsearch8DynamicSinkBaseITCas
                                         .await())
                 .isInstanceOf(ValidationException.class)
                 .hasMessage(expectedExceptionMsg);
+    }
+
+    @TestTemplate
+    public void testDeleteStrategyDeleteRowOnPk() throws Exception {
+        String index = "delete-strategy-delete-row-on-pk";
+        writeChangelog(
+                index,
+                DeleteStrategy.DELETE_ROW_ON_PK,
+                null,
+                Arrays.asList(
+                        Row.ofKind(RowKind.INSERT, 1, "a"),
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, "a"),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, "b"),
+                        Row.ofKind(RowKind.INSERT, 2, "c"),
+                        Row.ofKind(RowKind.DELETE, 2, "c")));
+
+        assertThat(makeGetRequest(index, "1")).isEqualTo(document(1, "b"));
+        assertThat(documentExists(index, "2")).isFalse();
+    }
+
+    @TestTemplate
+    public void testDeleteStrategyIgnoreDelete() throws Exception {
+        String index = "delete-strategy-ignore-delete";
+        writeChangelog(
+                index,
+                DeleteStrategy.IGNORE_DELETE,
+                null,
+                Arrays.asList(
+                        Row.ofKind(RowKind.INSERT, 1, "a"),
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, "a"),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, "b"),
+                        Row.ofKind(RowKind.DELETE, 1, "b"),
+                        Row.ofKind(RowKind.INSERT, 2, "c"),
+                        Row.ofKind(RowKind.DELETE, 2, "c")));
+
+        assertThat(makeGetRequest(index, "1")).isEqualTo(document(1, "b"));
+        assertThat(makeGetRequest(index, "2")).isEqualTo(document(2, "c"));
+    }
+
+    @TestTemplate
+    public void testDeleteStrategyIgnoreDeleteWithSinkParallelism() throws Exception {
+        // sink parallelism != input parallelism makes the planner key the stream by primary key
+        // in front of the (filtering) DataStreamSinkProvider
+        String index = "delete-strategy-ignore-delete-parallel";
+        writeChangelog(
+                index,
+                DeleteStrategy.IGNORE_DELETE,
+                2,
+                Arrays.asList(
+                        Row.ofKind(RowKind.INSERT, 1, "a"),
+                        Row.ofKind(RowKind.DELETE, 1, "a"),
+                        Row.ofKind(RowKind.INSERT, 2, "c"),
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 2, "c"),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 2, "d"),
+                        Row.ofKind(RowKind.DELETE, 2, "d")));
+
+        assertThat(makeGetRequest(index, "1")).isEqualTo(document(1, "a"));
+        assertThat(makeGetRequest(index, "2")).isEqualTo(document(2, "d"));
+    }
+
+    @TestTemplate
+    public void testDeleteStrategyNonPkFieldToNull() throws Exception {
+        String index = "delete-strategy-non-pk-field-to-null";
+        writeChangelog(
+                index,
+                DeleteStrategy.NON_PK_FIELD_TO_NULL,
+                null,
+                Arrays.asList(
+                        Row.ofKind(RowKind.INSERT, 1, "a"),
+                        Row.ofKind(RowKind.DELETE, 1, "a"),
+                        Row.ofKind(RowKind.INSERT, 2, "c")));
+
+        assertThat(makeGetRequest(index, "1")).isEqualTo(document(1, null));
+        assertThat(makeGetRequest(index, "2")).isEqualTo(document(2, "c"));
+    }
+
+    @TestTemplate
+    public void testDeleteStrategyChangelogStandard() throws Exception {
+        String index = "delete-strategy-changelog-standard";
+        writeChangelog(
+                index,
+                DeleteStrategy.CHANGELOG_STANDARD,
+                null,
+                Arrays.asList(
+                        Row.ofKind(RowKind.INSERT, 1, "a"),
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, "a"),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, "b"),
+                        Row.ofKind(RowKind.INSERT, 2, "c"),
+                        Row.ofKind(RowKind.DELETE, 2, "c"),
+                        Row.ofKind(RowKind.INSERT, 3, "e"),
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 3, "e")));
+
+        assertThat(makeGetRequest(index, "1")).isEqualTo(document(1, "b"));
+        assertThat(documentExists(index, "2")).isFalse();
+        // CHANGELOG_STANDARD deletes on UPDATE_BEFORE as well
+        assertThat(documentExists(index, "3")).isFalse();
+    }
+
+    private void writeChangelog(
+            String index,
+            DeleteStrategy deleteStrategy,
+            @Nullable Integer sinkParallelism,
+            List<Row> changelog)
+            throws Exception {
+        TableEnvironment tableEnvironment =
+                TableEnvironment.create(EnvironmentSettings.inStreamingMode());
+        // keep the changelog ordered: single source / sink subtask unless overridden
+        tableEnvironment.getConfig().set(CoreOptions.DEFAULT_PARALLELISM, 1);
+
+        String dataId = TestValuesTableFactory.registerData(changelog);
+        tableEnvironment.executeSql(
+                String.format(
+                        "CREATE TABLE changelog ("
+                                + "a INT NOT NULL,\n"
+                                + "b STRING\n"
+                                + ") WITH ("
+                                + "'connector' = 'values',\n"
+                                + "'data-id' = '%s',\n"
+                                + "'bounded' = 'true',\n"
+                                + "'changelog-mode' = 'I,UA,UB,D'"
+                                + ")",
+                        dataId));
+
+        String sinkOptions =
+                String.format(",'%s'='%s'\n", DELETE_STRATEGY_OPTION.key(), deleteStrategy);
+        if (sinkParallelism != null) {
+            sinkOptions +=
+                    String.format(
+                            ",'%s'='%s'\n", FactoryUtil.SINK_PARALLELISM.key(), sinkParallelism);
+        }
+        tableEnvironment.executeSql(
+                "CREATE TABLE esTable ("
+                        + "a INT NOT NULL,\n"
+                        + "b STRING,\n"
+                        + "PRIMARY KEY (a) NOT ENFORCED\n"
+                        + ") WITH ("
+                        + getConnectorSql(index)
+                        + sinkOptions
+                        + ")");
+
+        tableEnvironment.executeSql("INSERT INTO esTable SELECT * FROM changelog").await();
+    }
+
+    private static Map<Object, Object> document(int a, @Nullable String b) {
+        Map<Object, Object> document = new HashMap<>();
+        document.put("a", a);
+        document.put("b", b);
+        return document;
     }
 
     @TestTemplate

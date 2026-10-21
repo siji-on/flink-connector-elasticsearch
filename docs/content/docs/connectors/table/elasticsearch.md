@@ -173,7 +173,7 @@ Connector Options
       <td style="word-wrap: break-word;">1000</td>
       <td>Integer</td>
       <td>Maximum number of buffered actions per bulk request.
-      Can be set to <code>'0'</code> to disable it (must be greater than 0 in <code>elasticsearch 8</code>).
+      Can be set to <code>'-1'</code> to disable it (must be greater than 0 in <code>elasticsearch 8</code>).
       </td>
     </tr>
     <tr>
@@ -183,7 +183,7 @@ Connector Options
       <td style="word-wrap: break-word;">2mb</td>
       <td>MemorySize</td>
       <td>Maximum size in memory of buffered actions per bulk request. Must be in MB granularity.
-      Can be set to <code>'0'</code> to disable it (must be greater than 0 in <code>elasticsearch 8</code>).
+      Can be set to <code>'-1'</code> to disable it (must be greater than 0 in <code>elasticsearch 8</code>).
       </td>
     </tr>
     <tr>
@@ -193,7 +193,7 @@ Connector Options
       <td style="word-wrap: break-word;">1s</td>
       <td>Duration</td>
       <td>The interval to flush buffered actions.
-        Can be set to <code>'0'</code> to disable it (must be greater than 0 in <code>elasticsearch 8</code>). Note, both <code>'sink.bulk-flush.max-size'</code> and <code>'sink.bulk-flush.max-actions'</code>
+        Can be set to <code>'-1'</code> to disable it (must be greater than 0 in <code>elasticsearch 8</code>). Note, both <code>'sink.bulk-flush.max-size'</code> and <code>'sink.bulk-flush.max-actions'</code>
         can be set to <code>'0'</code> with the flush interval set allowing for complete async processing of buffered actions (not supported in <code>elasticsearch 8</code>, as its underlying async sink requires all flush parameters to be positive).
       </td>
     </tr>
@@ -212,6 +212,21 @@ Connector Options
       <td style="word-wrap: break-word;">50</td>
       <td>Integer</td>
       <td>The maximum number of in flight requests allowed. Note that this option is ONLY supported in <code>elasticsearch-8</code>.</td>
+    </tr>
+    <tr>
+      <td><h5>sink.delete-strategy</h5></td>
+      <td>optional</td>
+      <td>yes</td>
+      <td style="word-wrap: break-word;">DELETE_ROW_ON_PK</td>
+      <td>String</td>
+      <td>How retraction rows (<code>UPDATE_BEFORE</code> / <code>DELETE</code>) are written to Elasticsearch. Valid values are:
+      <ul>
+        <li><code>DELETE_ROW_ON_PK</code>: drop <code>UPDATE_BEFORE</code> rows and delete the document identified by the primary key on <code>DELETE</code> rows.</li>
+        <li><code>IGNORE_DELETE</code>: drop <code>UPDATE_BEFORE</code> and <code>DELETE</code> rows. Documents are never deleted.</li>
+        <li><code>NON_PK_FIELD_TO_NULL</code>: drop <code>UPDATE_BEFORE</code> rows. On <code>DELETE</code> rows keep the document and set every non primary key field to <code>null</code>. Requires a primary key.</li>
+        <li><code>CHANGELOG_STANDARD</code>: follow the changelog literally and delete the document on both <code>UPDATE_BEFORE</code> and <code>DELETE</code> rows.</li>
+      </ul>
+      See <a href="#delete-strategy">Delete Strategy</a>. Note that this option is ONLY supported in <code>elasticsearch-8</code>.</td>
     </tr>
     <tr>
       <td><h5>sink.bulk-flush.backoff.strategy</h5></td>
@@ -288,6 +303,16 @@ Certain types are not allowed as a primary key field as they do not have a good 
 If no primary key is specified, Elasticsearch will generate a document id automatically.
 
 See [CREATE TABLE DDL]({{< ref "docs/dev/table/sql/create" >}}#create-table) for more details about the PRIMARY KEY syntax.
+
+### Delete Strategy
+
+In upsert mode the `elasticsearch-8` connector decides with `sink.delete-strategy` what a retraction does to a document.
+
+By default (`DELETE_ROW_ON_PK`) a `DELETE` row deletes the document and `UPDATE_BEFORE` rows are dropped, since the `UPDATE_AFTER` row that follows overwrites the document anyway.
+Use `IGNORE_DELETE` when documents must survive retractions, for example when an upstream join or aggregation retracts rows that are re-emitted later, or when Elasticsearch is only ever appended to.
+Use `NON_PK_FIELD_TO_NULL` to keep the document but clear all non primary key fields on `DELETE`, and `CHANGELOG_STANDARD` to also delete on `UPDATE_BEFORE`.
+
+The option only affects which bulk operations are sent; `INSERT` rows are always indexed and `UPDATE_AFTER` rows are always upserted.
 
 ### Dynamic Index
 

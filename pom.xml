@@ -29,7 +29,7 @@ under the License.
 
 	<groupId>org.apache.flink</groupId>
 	<artifactId>flink-connector-elasticsearch-parent</artifactId>
-	<version>4.0-SNAPSHOT</version>
+	<version>4.0.1-bp1-2.1</version>
 	<name>Flink : Connectors : Elasticsearch : Parent</name>
 	<packaging>pom</packaging>
 	<inceptionYear>2022</inceptionYear>
@@ -52,6 +52,14 @@ under the License.
 
 	<properties>
 		<flink.version>2.0.0</flink.version>
+		<!-- bucketplace fork: the ASF license checker (JarFileChecker in flink-ci-tools) flags the
+		     EPL-2.0 / GPL-2.0-with-CPE dual-licence header of org.eclipse.parsson in the ES8 SQL uber
+		     jar. Flink whitelisted that false positive in FLINK-39818 (2026-06), which as of 2026-10 is
+		     only in the 2.2 / 2.3 / 2.4 branch snapshots and in no released flink-ci-tools (2.2.1 and
+		     2.3.0 predate it). Upstream CI passes because it builds against 2.2-SNAPSHOT, so use the
+		     same checker here. It is a build-time tool only; it never ends up in the artifacts.
+		     Move to the first release that contains FLINK-39818 (2.2.2 / 2.3.1) once available. -->
+		<flink.ci-tools.version>2.2-SNAPSHOT</flink.ci-tools.version>
 
 		<jackson-bom.version>2.15.3</jackson-bom.version>
 		<junit4.version>4.13.2</junit4.version>
@@ -309,6 +317,13 @@ under the License.
 				<version>1.1.10.4</version>
 			</dependency>
 
+			<!-- For dependency convergence  -->
+			<dependency>
+				<groupId>jakarta.json</groupId>
+				<artifactId>jakarta.json-api</artifactId>
+				<version>2.0.2</version>
+			</dependency>
+
 			<!-- For dependency convergence -->
 			<dependency>
 				<groupId>com.fasterxml.jackson</groupId>
@@ -400,6 +415,7 @@ under the License.
 			<modules>
 				<module>flink-sql-connector-elasticsearch6</module>
 				<module>flink-sql-connector-elasticsearch7</module>
+				<module>flink-sql-connector-elasticsearch8</module>
 			</modules>
 		</profile>
 	</profiles>
@@ -415,7 +431,7 @@ under the License.
 					<dependency>
 						<groupId>org.apache.flink</groupId>
 						<artifactId>flink-ci-tools</artifactId>
-						<version>${flink.version}</version>
+						<version>${flink.ci-tools.version}</version>
 					</dependency>
 				</dependencies>
 			</plugin>

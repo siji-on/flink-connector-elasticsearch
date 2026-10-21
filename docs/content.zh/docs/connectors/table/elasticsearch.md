@@ -159,7 +159,7 @@ CREATE TABLE myUserTable (
       <td style="word-wrap: break-word;">1000</td>
       <td>Integer</td>
       <td>每个批量请求的最大缓冲操作数。
-      可以设置为<code>'0'</code>来禁用它（<code>elasticsearch-8</code>中必须大于0）。
+      可以设置为<code>'-1'</code>来禁用它（<code>elasticsearch-8</code>中必须大于0）。
       </td>
     </tr>
     <tr>
@@ -168,7 +168,7 @@ CREATE TABLE myUserTable (
       <td style="word-wrap: break-word;">2mb</td>
       <td>MemorySize</td>
       <td>每个批量请求的缓冲操作在内存中的最大值。单位必须为 MB。
-      可以设置为<code>'0'</code>来禁用它（<code>elasticsearch-8</code>中必须大于0）。
+      可以设置为<code>'-1'</code>来禁用它（<code>elasticsearch-8</code>中必须大于0）。
       </td>
     </tr>
     <tr>
@@ -177,7 +177,7 @@ CREATE TABLE myUserTable (
       <td style="word-wrap: break-word;">1s</td>
       <td>Duration</td>
       <td>flush 缓冲操作的间隔。
-        可以设置为<code>'0'</code>来禁用它（<code>elasticsearch-8</code>中必须大于0）。注意，<code>'sink.bulk-flush.max-size'</code>和<code>'sink.bulk-flush.max-actions'</code>都设置为<code>'0'</code>的这种 flush 间隔设置允许对缓冲操作进行完全异步处理（<code>elasticsearch-8</code>不支持如此配置，因其底层的异步 sink 要求所有 flush 参数必须为正数）。
+        可以设置为<code>'-1'</code>来禁用它（<code>elasticsearch-8</code>中必须大于0）。注意，<code>'sink.bulk-flush.max-size'</code>和<code>'sink.bulk-flush.max-actions'</code>都设置为<code>'0'</code>的这种 flush 间隔设置允许对缓冲操作进行完全异步处理（<code>elasticsearch-8</code>不支持如此配置，因其底层的异步 sink 要求所有 flush 参数必须为正数）。
       </td>
     </tr>
     <tr>
@@ -193,6 +193,20 @@ CREATE TABLE myUserTable (
       <td style="word-wrap: break-word;">50</td>
       <td>Integer</td>
       <td>允许的最大 in flight 请求数。注意此配置项仅<code>elasticsearch-8</code>支持。</td>
+    </tr>
+    <tr>
+      <td><h5>sink.delete-strategy</h5></td>
+      <td>可选</td>
+      <td style="word-wrap: break-word;">DELETE_ROW_ON_PK</td>
+      <td>String</td>
+      <td>回撤消息（<code>UPDATE_BEFORE</code> / <code>DELETE</code>）如何写入 Elasticsearch。可选值：
+      <ul>
+        <li><code>DELETE_ROW_ON_PK</code>：忽略 <code>UPDATE_BEFORE</code>，收到 <code>DELETE</code> 时按主键删除文档。</li>
+        <li><code>IGNORE_DELETE</code>：忽略 <code>UPDATE_BEFORE</code> 和 <code>DELETE</code>，文档永远不会被删除。</li>
+        <li><code>NON_PK_FIELD_TO_NULL</code>：忽略 <code>UPDATE_BEFORE</code>，收到 <code>DELETE</code> 时保留文档并把所有非主键字段置为 <code>null</code>。需要定义主键。</li>
+        <li><code>CHANGELOG_STANDARD</code>：严格按照 changelog 语义，<code>UPDATE_BEFORE</code> 和 <code>DELETE</code> 都删除文档。</li>
+      </ul>
+      注意此配置项仅<code>elasticsearch-8</code>支持。</td>
     </tr>
     <tr>
       <td><h5>sink.bulk-flush.backoff.strategy</h5></td>
@@ -263,6 +277,14 @@ Elasticsearch 连接器通过使用 `document-id.key-delimiter` 指定的键分�
 如果未指定主键，Elasticsearch 将自动生成文档 id。
 
 有关 PRIMARY KEY 语法的更多详细信息，请参见 [CREATE TABLE DDL]({{< ref "docs/dev/table/sql/create" >}}#create-table)。
+
+### 删除策略
+
+在 upsert 模式下，`elasticsearch-8` 连接器通过 `sink.delete-strategy` 决定回撤消息对文档的影响。
+默认值 `DELETE_ROW_ON_PK` 在收到 `DELETE` 时删除文档并忽略 `UPDATE_BEFORE`（随后的 `UPDATE_AFTER` 会覆盖文档）。
+如果文档不应被上游的回撤删除（例如 join / 聚合会先回撤再重新下发），使用 `IGNORE_DELETE`；
+`NON_PK_FIELD_TO_NULL` 保留文档但把非主键字段置为 `null`；`CHANGELOG_STANDARD` 则在 `UPDATE_BEFORE` 时也删除文档。
+该选项只影响回撤消息，`INSERT` 始终执行 index，`UPDATE_AFTER` 始终执行 upsert。
 
 ### 动态索引
 

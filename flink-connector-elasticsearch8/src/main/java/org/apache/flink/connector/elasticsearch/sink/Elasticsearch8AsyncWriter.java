@@ -39,6 +39,7 @@ import co.elastic.clients.elasticsearch.core.bulk.BulkOperation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.net.ConnectException;
 import java.net.NoRouteToHostException;
 import java.util.ArrayList;
@@ -68,6 +69,8 @@ public class Elasticsearch8AsyncWriter<InputT> extends AsyncSinkWriter<InputT, O
     private final Counter numRecordsSendPartialFailureCounter;
     /** A counter to track the number of bulk requests that are sent to Elasticsearch. */
     private final Counter numRequestSubmittedCounter;
+
+    private final OperationSerializer operationSerializer;
 
     private static final FatalExceptionClassifier ELASTICSEARCH_FATAL_EXCEPTION_CLASSIFIER =
             FatalExceptionClassifier.createChain(
@@ -112,6 +115,7 @@ public class Elasticsearch8AsyncWriter<InputT> extends AsyncSinkWriter<InputT, O
         this.numRecordsSendPartialFailureCounter =
                 metricGroup.counter("numRecordsSendPartialFailure");
         this.numRequestSubmittedCounter = metricGroup.counter("numRequestSubmitted");
+        this.operationSerializer = new OperationSerializer();
     }
 
     @Override
@@ -192,14 +196,20 @@ public class Elasticsearch8AsyncWriter<InputT> extends AsyncSinkWriter<InputT, O
 
     @Override
     protected long getSizeInBytes(Operation requestEntry) {
-        return new OperationSerializer().size(requestEntry);
+        return operationSerializer.size(requestEntry);
     }
 
     @Override
     public void close() {
         if (!close) {
             close = true;
-            esClient.shutdown();
+            try {
+                if (esClient != null && esClient._transport() != null) {
+                    esClient._transport().close();
+                }
+            } catch (IOException e) {
+                LOG.warn("Failed to close Elasticsearch transport during sink close", e);
+            }
         }
     }
 }
