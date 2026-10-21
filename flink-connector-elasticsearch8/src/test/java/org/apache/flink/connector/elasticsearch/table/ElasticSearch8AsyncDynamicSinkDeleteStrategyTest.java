@@ -22,7 +22,9 @@
 package org.apache.flink.connector.elasticsearch.table;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.connector.base.sink.writer.TestSinkInitContext;
 import org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.DeleteStrategy;
+import org.apache.flink.formats.common.TimestampFormat;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.Column;
@@ -207,12 +209,12 @@ class ElasticSearch8AsyncDynamicSinkDeleteStrategyTest {
                         ZoneId.systemDefault());
         RowDataElementConverter converter =
                 new RowDataElementConverter(
-                        rowType,
+                        RowDataElementConverterTest.jsonSerializer(rowType, TimestampFormat.SQL),
                         indexGenerator,
                         row -> String.valueOf(row.getInt(0)),
                         strategy,
                         Collections.singleton("a"));
-        converter.open(null);
+        converter.open(new TestSinkInitContext());
         return converter;
     }
 

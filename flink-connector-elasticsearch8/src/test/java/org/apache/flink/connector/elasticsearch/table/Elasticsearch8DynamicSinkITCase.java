@@ -430,6 +430,53 @@ class Elasticsearch8DynamicSinkITCase extends Elasticsearch8DynamicSinkBaseITCas
         assertThat(documentExists(index, "3")).isFalse();
     }
 
+    @TestTemplate
+    public void testNestedRowsAndTimestampFormatAreWrittenByTheFormat() throws Exception {
+        // ROW / ARRAY<ROW> columns and json.* options only work when the document is produced by
+        // the table format (the Alibaba / legacy connectors behaved like this, cdoc DDLs rely on it)
+        TableEnvironment tableEnvironment =
+                TableEnvironment.create(EnvironmentSettings.inStreamingMode());
+        String index = "nested-rows-iso-timestamps";
+        tableEnvironment.executeSql(
+                "CREATE TABLE esTable ("
+                        + "id STRING NOT NULL,\n"
+                        + "ts TIMESTAMP(3),\n"
+                        + "ts_ltz TIMESTAMP_LTZ(3),\n"
+                        + "amount DECIMAL(20, 2),\n"
+                        + "opt ROW<code STRING, qty INT>,\n"
+                        + "opts ARRAY<ROW<code STRING, qty INT>>,\n"
+                        + "PRIMARY KEY (id) NOT ENFORCED\n"
+                        + ") WITH ("
+                        + getConnectorSql(index)
+                        + ",'json.timestamp-format.standard' = 'ISO-8601'\n"
+                        + ")");
+        tableEnvironment
+                .executeSql(
+                        "INSERT INTO esTable VALUES ("
+                                + "'1', "
+                                + "TIMESTAMP '2012-12-12 12:12:12.123', "
+                                + "TO_TIMESTAMP_LTZ(1355314332123, 3), "
+                                + "CAST(1234.50 AS DECIMAL(20, 2)), "
+                                + "ROW('A', 2), "
+                                + "ARRAY[ROW('A', 2), ROW('B', 3)])")
+                .await();
+
+        Map<String, Object> optA = new HashMap<>();
+        optA.put("code", "A");
+        optA.put("qty", 2);
+        Map<String, Object> optB = new HashMap<>();
+        optB.put("code", "B");
+        optB.put("qty", 3);
+        Map<String, Object> expected = new HashMap<>();
+        expected.put("id", "1");
+        expected.put("ts", "2012-12-12T12:12:12.123");
+        expected.put("ts_ltz", "2012-12-12T12:12:12.123Z");
+        expected.put("amount", 1234.5d);
+        expected.put("opt", optA);
+        expected.put("opts", Arrays.asList(optA, optB));
+        assertThat(makeGetRequest(index, "1")).isEqualTo(expected);
+    }
+
     private void writeChangelog(
             String index,
             DeleteStrategy deleteStrategy,

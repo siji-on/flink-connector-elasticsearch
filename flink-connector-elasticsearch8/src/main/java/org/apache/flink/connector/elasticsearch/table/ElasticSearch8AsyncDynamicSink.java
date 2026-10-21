@@ -156,9 +156,13 @@ public class ElasticSearch8AsyncDynamicSink extends AsyncDynamicTableSink<Operat
         builder.setMaxInFlightRequests(config.getBulkFlushMaxInFlightActions());
         builder.setMaxBatchSizeInBytes(config.getBulkFlushMaxByteSize().getBytes());
         builder.setMaxTimeInBufferMS(config.getBulkFlushInterval());
+        // The document body comes from the table format (json by default), so nested types and
+        // the format options (e.g. json.timestamp-format.standard) behave like in other sinks.
+        SerializationSchema<RowData> documentSerializer =
+                format.createRuntimeEncoder(context, physicalRowDataType);
         builder.setElementConverter(
                 new RowDataElementConverter(
-                        physicalRowDataType,
+                        documentSerializer,
                         createIndexGenerator(),
                         createKeyExtractor(),
                         deleteStrategy,
