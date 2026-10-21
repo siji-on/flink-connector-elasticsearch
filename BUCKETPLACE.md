@@ -187,22 +187,21 @@ poison pill 이 운영상 문제가 되면 `Elasticsearch8AsyncWriter#handlePart
 
 | 위치 | 인증 | 용도 |
 | --- | --- | --- |
-| GitHub Release `https://github.com/siji-on/flink-connector-elasticsearch/releases/download/<tag>/<artifact>-<ver>.jar` | 없음 | Gradle ivy 저장소, 수동 다운로드 |
+| GitHub Release `https://github.com/siji-on/flink-connector-elasticsearch/releases/download/<tag>/<artifact>-<ver>.jar` | 없음 | **cdoc flink-app 이미지가 받는 곳.** Gradle ivy 저장소, 수동 다운로드에도 쓴다 |
 | 이 저장소의 GitHub Packages (`maven.pkg.github.com/siji-on/flink-connector-elasticsearch`) | `read:packages` 토큰 | 로컬 Maven/Gradle 에서 편할 때 |
-| `bucketplace/cdoc` 의 GitHub Packages (`maven.pkg.github.com/bucketplace/cdoc`) | 저장소 시크릿 `CDOC_PACKAGES_TOKEN` 이 있을 때만 | **flink-app 이미지가 받는 곳.** `packages-flink-2.1.list` 에 `org.apache.flink:flink-sql-connector-elasticsearch8:<ver>` 한 줄 |
 
-cdoc 의 flink-app 이미지(`cdoc-image/flink-app/download-packages.sh`)는 Maven 좌표를 Central(또는 사내 Nexus)과
-`maven.pkg.github.com/bucketplace/cdoc` 에서만 받는다. 그래서 publish workflow 가 `bucketplace/cdoc` Packages 에도
-배포한다. 이 단계는 시크릿 `CDOC_PACKAGES_TOKEN` 이 설정돼 있을 때만 돌고, 토큰은 그 단계의 환경 변수로만 전달된다.
+**cdoc 이미지 연결.** 이 저장소에서 cdoc 쪽으로 무언가를 밀어넣지 않는다. cdoc 의 flink-app 이미지
+(`cdoc-image/flink-app/download-packages.sh`)가 빌드 시점에 `packages-flink-2.1.list` 의 Release URL 줄을 읽어
+jar 를 받고 sha256 으로 검증한다. 포크 Release 는 공개라 토큰이 필요 없다.
 
-- 토큰: `bucketplace/cdoc` 에 **Packages: write** 만 가진 fine-grained PAT (만료 90일 이하 권장). fine-grained PAT 로
-  Packages 업로드가 거부되면 classic PAT `write:packages` 가 필요한데, 이건 `repo` 스코프까지 요구하므로 권한이 넓다.
-  그 경우 반대로 cdoc 저장소 쪽에 "Release 에서 jar 를 받아 자기 Packages 에 올리는" workflow 를 두는 편이 안전하다
-  (cdoc 의 `GITHUB_TOKEN` 은 자기 저장소 Packages 에 쓸 수 있어 PAT 이 필요 없다).
-- 노출 경로: Actions 시크릿은 로그에서 마스킹되고, 포크 PR 의 `pull_request` 트리거에는 전달되지 않는다. publish 는
-  태그 push 와 수동 실행에서만 돌고 둘 다 저장소 쓰기 권한이 있어야 하므로 외부인이 이 단계를 트리거할 수 없다.
-  남는 위험은 빌드 중 실행되는 Maven 플러그인/의존성이 토큰을 빼가는 공급망 공격뿐이고, 그래서 권한을 Packages write
-  하나로 줄이고 만료를 짧게 둔다.
+```
+# packages-flink-2.1.list
+https://github.com/siji-on/flink-connector-elasticsearch/releases/download/v4.0.1-bp2-2.1/flink-sql-connector-elasticsearch8-4.0.1-bp2-2.1.jar sha256=1b62cf24d642da740f6e546e870a54144390f4ab76d57ea6084631c113fdd8cb
+```
+
+새 버전을 올릴 때는 태그를 push 해 Release 가 생기면 `shasum -a 256` 으로 해시를 구해 cdoc 의 그 줄을 바꾸는 PR 을 낸다.
+(초기에는 publish workflow 가 PAT 로 `bucketplace/cdoc` Packages 에 배포하는 안을 넣었다가, 외부 빌드를 cdoc 에
+밀어넣는 모양이 부자연스럽고 토큰 관리가 늘어나 이 방식으로 바꿨다.)
 
 Gradle 에서 토큰 없이 받으려면 Release 다운로드 URL 을 ivy 패턴 저장소로 잡는다:
 
