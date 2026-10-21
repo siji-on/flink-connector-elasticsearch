@@ -40,6 +40,9 @@ import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.util.StringUtils;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.List;
@@ -50,6 +53,9 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.commons.lang3.StringUtils.capitalize;
+import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.BULK_FLUSH_BACKOFF_DELAY_OPTION;
+import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.BULK_FLUSH_BACKOFF_MAX_RETRIES_OPTION;
+import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.BULK_FLUSH_BACKOFF_STRATEGY_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.BULK_FLUSH_INTERVAL_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.BULK_FLUSH_MAX_ACTIONS_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.BULK_FLUSH_MAX_BUFFERED_ACTIONS_OPTION;
@@ -60,6 +66,7 @@ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8Conne
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.CONNECTION_TIMEOUT;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.DELETE_STRATEGY_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.DELIVERY_GUARANTEE_OPTION;
+import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.FLUSH_ON_CHECKPOINT_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.FORMAT_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.HOSTS_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.INDEX_OPTION;
@@ -80,6 +87,9 @@ import static org.apache.flink.table.factories.FactoryUtil.SINK_PARALLELISM;
 @Internal
 public class ElasticSearch8AsyncDynamicTableFactory extends AsyncDynamicTableSinkFactory {
 
+    private static final Logger LOG =
+            LoggerFactory.getLogger(ElasticSearch8AsyncDynamicTableFactory.class);
+
     private static final String IDENTIFIER = "elasticsearch-8";
 
     @Override
@@ -95,6 +105,7 @@ public class ElasticSearch8AsyncDynamicTableFactory extends AsyncDynamicTableSin
         Elasticsearch8Configuration config = getConfiguration(helper);
         helper.validate();
         validateConfiguration(config);
+        warnAboutIgnoredLegacyOptions(helper.getOptions());
         validate(
                 config.getDeleteStrategy()
                                 != Elasticsearch8ConnectorOptions.DeleteStrategy
@@ -197,6 +208,34 @@ public class ElasticSearch8AsyncDynamicTableFactory extends AsyncDynamicTableSin
         }
     }
 
+    /**
+     * Options of the legacy Elasticsearch table connectors are accepted so that existing DDLs keep
+     * working, but the async sink has no equivalent behaviour. Say so once per table instead of
+     * failing or silently swallowing them.
+     */
+    void warnAboutIgnoredLegacyOptions(ReadableConfig options) {
+        if (!options.get(FLUSH_ON_CHECKPOINT_OPTION)) {
+            LOG.warn(
+                    "'{}' = 'false' is ignored: the Elasticsearch 8 sink always flushes buffered "
+                            + "actions on checkpoint.",
+                    FLUSH_ON_CHECKPOINT_OPTION.key());
+        }
+        List<String> ignored =
+                Stream.of(
+                                BULK_FLUSH_BACKOFF_STRATEGY_OPTION,
+                                BULK_FLUSH_BACKOFF_MAX_RETRIES_OPTION,
+                                BULK_FLUSH_BACKOFF_DELAY_OPTION)
+                        .filter(option -> options.getOptional(option).isPresent())
+                        .map(ConfigOption::key)
+                        .collect(Collectors.toList());
+        if (!ignored.isEmpty()) {
+            LOG.warn(
+                    "Options {} are accepted for compatibility but ignored: failed bulk items are "
+                            + "retried by the Elasticsearch 8 sink itself.",
+                    ignored);
+        }
+    }
+
     @Override
     public String factoryIdentifier() {
         return IDENTIFIER;
@@ -224,6 +263,10 @@ public class ElasticSearch8AsyncDynamicTableFactory extends AsyncDynamicTableSin
                         FORMAT_OPTION,
                         DELIVERY_GUARANTEE_OPTION,
                         DELETE_STRATEGY_OPTION,
+                        FLUSH_ON_CHECKPOINT_OPTION,
+                        BULK_FLUSH_BACKOFF_STRATEGY_OPTION,
+                        BULK_FLUSH_BACKOFF_MAX_RETRIES_OPTION,
+                        BULK_FLUSH_BACKOFF_DELAY_OPTION,
                         PASSWORD_OPTION,
                         USERNAME_OPTION,
                         SINK_PARALLELISM,
@@ -254,7 +297,11 @@ public class ElasticSearch8AsyncDynamicTableFactory extends AsyncDynamicTableSin
                         CONNECTION_TIMEOUT,
                         SOCKET_TIMEOUT,
                         SSL_CERTIFICATE_FINGERPRINT,
-                        DELETE_STRATEGY_OPTION)
+                        DELETE_STRATEGY_OPTION,
+                        FLUSH_ON_CHECKPOINT_OPTION,
+                        BULK_FLUSH_BACKOFF_STRATEGY_OPTION,
+                        BULK_FLUSH_BACKOFF_MAX_RETRIES_OPTION,
+                        BULK_FLUSH_BACKOFF_DELAY_OPTION)
                 .collect(Collectors.toSet());
     }
 }
