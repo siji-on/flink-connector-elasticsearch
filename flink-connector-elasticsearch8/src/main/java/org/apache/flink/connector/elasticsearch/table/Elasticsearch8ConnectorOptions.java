@@ -107,6 +107,42 @@ public class Elasticsearch8ConnectorOptions {
                     .defaultValue(Duration.ofSeconds(1))
                     .withDescription("Bulk flush interval");
 
+    // ------------------------------------------------------------------------
+    // Options of the legacy (SinkFunction based) Elasticsearch table connectors. They are accepted
+    // so that existing DDLs keep working, but they have no effect on the async sink: it always
+    // flushes its buffer on checkpoint and retries failed bulk items with its own policy.
+    // ------------------------------------------------------------------------
+
+    public static final ConfigOption<Boolean> FLUSH_ON_CHECKPOINT_OPTION =
+            ConfigOptions.key("sink.flush-on-checkpoint")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Accepted for compatibility with the legacy connector. The async sink "
+                                    + "always flushes buffered actions on checkpoint; 'false' is ignored.");
+
+    public static final ConfigOption<String> BULK_FLUSH_BACKOFF_STRATEGY_OPTION =
+            ConfigOptions.key("sink.bulk-flush.backoff.strategy")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Accepted for compatibility with the legacy connector and ignored. "
+                                    + "Failed bulk items are retried by the async sink.");
+
+    public static final ConfigOption<Integer> BULK_FLUSH_BACKOFF_MAX_RETRIES_OPTION =
+            ConfigOptions.key("sink.bulk-flush.backoff.max-retries")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Accepted for compatibility with the legacy connector and ignored.");
+
+    public static final ConfigOption<Duration> BULK_FLUSH_BACKOFF_DELAY_OPTION =
+            ConfigOptions.key("sink.bulk-flush.backoff.delay")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Accepted for compatibility with the legacy connector and ignored.");
+
     public static final ConfigOption<String> CONNECTION_PATH_PREFIX_OPTION =
             ConfigOptions.key("connection.path-prefix")
                     .stringType()
