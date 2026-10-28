@@ -1,18 +1,23 @@
 ################################################################################
-# bucketplace fork: publish the Elasticsearch 8 connector (plain + SQL uber jar).
+# bucketplace fork: publish the Elasticsearch 8 connector (plain + SQL uber jar) for every
+# supported Flink 2.x minor.
 #
-# Two outputs:
+# Versioning: the pom holds the connector version without a Flink suffix (e.g. 4.0.1-bp3).
+# For each Flink version in the matrix this workflow sets the version to
+# <connector>-<flink minor> (4.0.1-bp3-2.1, 4.0.1-bp3-2.2, ...) before building, the same
+# scheme the Apache connector releases use.
+#
+# Two outputs per Flink minor:
 #   1. this repository's GitHub Packages Maven registry (needs a token with read:packages
 #      to consume, even on a public repository);
-#   2. on tag builds, the jars are attached to a GitHub Release of the same name, which can
-#      be downloaded without any token:
-#      https://github.com/<owner>/<repo>/releases/download/<tag>/<artifact>-<version>.jar
+#   2. on tag builds, the jars are attached to one GitHub Release named after the tag, which
+#      can be downloaded without any token:
+#      https://github.com/<owner>/<repo>/releases/download/<tag>/<artifact>-<connector>-<flink minor>.jar
 #      Downstream images pull the jars from this URL (pinned by sha256) at build time;
 #      nothing is pushed anywhere else from here.
 #
-# Trigger: push a tag `v<connector>-<flink>` (e.g. v4.0.1-bp2-2.1) or run manually.
-# The pom version is the source of truth for the artifact version; the tag is only
-# the trigger. Flink version comes from the workflow input / default.
+# Trigger: push a tag `v<connector>` (e.g. v4.0.1-bp3) or run manually with a JSON list of
+# Flink versions. The tag is only the trigger; the pom is the source of truth for the version.
 ################################################################################
 name: Publish to GitHub Packages
 on:
@@ -20,19 +25,50 @@ on:
     tags: [ 'v*' ]
   workflow_dispatch:
     inputs:
-      flink_version:
-        description: Flink version to build against (-Dflink.version)
+      flink_versions:
+        description: JSON list of Flink versions to build against (one artifact set per minor)
         required: true
-        default: '2.1.3'
+        default: '["2.3.0", "2.2.1", "2.1.3"]'
+
+env:
+  DEFAULT_FLINK_VERSIONS: '["2.3.0", "2.2.1", "2.1.3"]'
 
 jobs:
-  publish:
+  # Create the Release once so that the per-Flink jobs only upload into it.
+  prepare-release:
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
-      contents: write # create the release on tag builds
-      packages: write
+      contents: write
     env:
-      FLINK_VERSION: ${{ github.event.inputs.flink_version || '2.1.3' }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the GitHub Release if it does not exist
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME exists"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "Elasticsearch 8 connector for Flink 2.x. One jar set per Flink minor (suffix -2.1, -2.2, ...). See BUCKETPLACE.md for usage and caveats."
+          fi
+
+  publish:
+    needs: prepare-release
+    # run on manual dispatch too (prepare-release is skipped there)
+    if: ${{ !cancelled() && (needs.prepare-release.result == 'success' || needs.prepare-release.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # upload release assets on tag builds
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        flink: ${{ fromJSON(github.event.inputs.flink_versions || '["2.3.0", "2.2.1", "2.1.3"]') }}
+    env:
+      FLINK_VERSION: ${{ matrix.flink }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +79,19 @@ jobs:
           cache: maven
           # writes ~/.m2/settings.xml with <server><id>github</id> using GITHUB_ACTOR / GITHUB_TOKEN
           server-id: github
+
+      - name: Set the version to <connector>-<flink minor>
+        run: |
+          set -euo pipefail
+          flink_minor="${FLINK_VERSION%.*}"
+          base_version="$(mvn -B -ntp -q help:evaluate -Dexpression=project.version -DforceStdout)"
+          case "$base_version" in
+            *-[0-9].[0-9]*) echo "pom version '$base_version' already carries a Flink suffix" >&2; exit 1 ;;
+          esac
+          version="${base_version}-${flink_minor}"
+          mvn -B -ntp -q versions:set -DnewVersion="$version" -DprocessAllModules=true -DgenerateBackupPoms=false
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "building $version against Flink $FLINK_VERSION"
 
       - name: Build and verify (unit tests only; ITCases need Docker and run in push_pr.yml)
         run: >
@@ -65,20 +114,14 @@ jobs:
           -pl flink-connector-elasticsearch8,flink-sql-connector-elasticsearch8 -am
           deploy
 
-      - name: Attach jars to a GitHub Release (tag builds only)
+      - name: Attach jars to the GitHub Release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          files=$(ls flink-connector-elasticsearch8/target/flink-connector-elasticsearch8-*.jar \
-                     flink-sql-connector-elasticsearch8/target/flink-sql-connector-elasticsearch8-*.jar \
-                  | grep -v -e '/original-' -e '-tests.jar')
+          files=$(ls flink-connector-elasticsearch8/target/flink-connector-elasticsearch8-${VERSION}.jar \
+                     flink-sql-connector-elasticsearch8/target/flink-sql-connector-elasticsearch8-${VERSION}.jar)
           echo "$files"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" $files --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" $files \
-              --title "$GITHUB_REF_NAME" \
-              --notes "Elasticsearch 8 connector built against Flink ${FLINK_VERSION}. See BUCKETPLACE.md for usage and caveats."
-          fi
+          sha256sum $files
+          gh release upload "$GITHUB_REF_NAME" $files --clobber

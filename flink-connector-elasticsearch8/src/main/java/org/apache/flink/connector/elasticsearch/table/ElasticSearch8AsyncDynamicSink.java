@@ -196,7 +196,7 @@ public class ElasticSearch8AsyncDynamicSink extends AsyncDynamicTableSink<Operat
 
         Elasticsearch8AsyncSink<RowData> sink = builder.build();
         Integer parallelism = config.getParallelism().orElse(null);
-        if (deleteStrategy.isIgnoreDelete()) {
+        if (deleteStrategy.isIgnoreUpdateBefore() || deleteStrategy.isIgnoreDelete()) {
             return new RowKindFilteringSinkProvider(sink, deleteStrategy, parallelism);
         }
         return SinkV2Provider.of(sink, parallelism);
@@ -259,6 +259,11 @@ public class ElasticSearch8AsyncDynamicSink extends AsyncDynamicTableSink<Operat
      * DELETE rows must accept them. The {@link org.apache.flink.connector.base.sink.AsyncSinkBase}
      * element converter in turn must produce exactly one request per record, so the only place to
      * skip a row is in front of the sink.
+     *
+     * <p>The filter is also used for strategies that only ignore UPDATE_BEFORE. The changelog mode
+     * already asks the planner to drop those rows, but not every planner configuration honours it
+     * (Flink 2.3 with {@code table.exec.sink.upsert-materialize = NONE} forwards them), and the
+     * converter must never see a row kind it is supposed to ignore.
      */
     @Internal
     static class RowKindFilteringSinkProvider implements DataStreamSinkProvider {
