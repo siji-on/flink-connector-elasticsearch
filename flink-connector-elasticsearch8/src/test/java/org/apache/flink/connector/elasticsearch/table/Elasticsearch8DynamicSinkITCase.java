@@ -25,6 +25,7 @@ import org.apache.flink.api.common.time.Deadline;
 import org.apache.flink.api.connector.sink2.Sink;
 import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.DeleteStrategy;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.EnvironmentSettings;
@@ -34,6 +35,7 @@ import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.UniqueConstraint;
+import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.SinkV2Provider;
 import org.apache.flink.table.data.GenericRowData;
@@ -63,6 +65,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.DELETE_STRATEGY_OPTION;
 import static org.apache.flink.table.api.Expressions.row;
@@ -109,15 +112,22 @@ class Elasticsearch8DynamicSinkITCase extends Elasticsearch8DynamicSinkBaseITCas
                                 getPrefilledTestContext(index).withSchema(schema).build())
                         .getSinkRuntimeProvider(new MockContext());
 
-        final SinkV2Provider sinkProvider = (SinkV2Provider) runtimeProvider;
-        final Sink<RowData> sink = sinkProvider.createSink();
         StreamExecutionEnvironment environment =
                 StreamExecutionEnvironment.getExecutionEnvironment();
 
         environment.setParallelism(PARALLELISM);
 
         rowData.setRowKind(RowKind.UPDATE_AFTER);
-        environment.<RowData>fromData(rowData).sinkTo(sink);
+        DataStream<RowData> input = environment.fromData(rowData);
+        // the default delete strategy ignores UPDATE_BEFORE, so the sink comes with a filter in
+        // front of it (DataStreamSinkProvider); CHANGELOG_STANDARD would be a plain SinkV2Provider
+        if (runtimeProvider instanceof DataStreamSinkProvider) {
+            ((DataStreamSinkProvider) runtimeProvider)
+                    .consumeDataStream(name -> Optional.empty(), input);
+        } else {
+            final Sink<RowData> sink = ((SinkV2Provider) runtimeProvider).createSink();
+            input.sinkTo(sink);
+        }
         environment.execute();
 
         Map<String, Object> response = makeGetRequest(index, "1_2012-12-12T12:12:12");
@@ -477,16 +487,57 @@ class Elasticsearch8DynamicSinkITCase extends Elasticsearch8DynamicSinkBaseITCas
         assertThat(makeGetRequest(index, "1")).isEqualTo(expected);
     }
 
+    @TestTemplate
+    public void testIgnoredRowKindsAreDroppedWithoutUpsertMaterializer() throws Exception {
+        // Without a SinkUpsertMaterializer the planner may forward UPDATE_BEFORE rows although
+        // the sink's changelog mode refuses them (observed on Flink 2.3 with
+        // table.exec.sink.upsert-materialize = NONE). The sink has to drop them itself instead
+        // of failing in the element converter.
+        String index = "delete-strategy-without-materializer";
+        writeChangelog(
+                index,
+                DeleteStrategy.DELETE_ROW_ON_PK,
+                null,
+                Arrays.asList(
+                        Row.ofKind(RowKind.INSERT, 1, "a"),
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, "a"),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, "b"),
+                        Row.ofKind(RowKind.INSERT, 2, "c"),
+                        Row.ofKind(RowKind.DELETE, 2, "c")),
+                "NONE");
+
+        assertThat(makeGetRequest(index, "1")).isEqualTo(document(1, "b"));
+        assertThat(documentExists(index, "2")).isFalse();
+    }
+
     private void writeChangelog(
             String index,
             DeleteStrategy deleteStrategy,
             @Nullable Integer sinkParallelism,
             List<Row> changelog)
             throws Exception {
+        writeChangelog(index, deleteStrategy, sinkParallelism, changelog, "FORCE");
+    }
+
+    private void writeChangelog(
+            String index,
+            DeleteStrategy deleteStrategy,
+            @Nullable Integer sinkParallelism,
+            List<Row> changelog,
+            String upsertMaterialize)
+            throws Exception {
         TableEnvironment tableEnvironment =
                 TableEnvironment.create(EnvironmentSettings.inStreamingMode());
         // keep the changelog ordered: single source / sink subtask unless overridden
         tableEnvironment.getConfig().set(CoreOptions.DEFAULT_PARALLELISM, 1);
+        // The changelog source has no primary key, so its upsert key differs from the sink's.
+        // Up to Flink 2.2 the planner silently added a SinkUpsertMaterializer for that; since
+        // Flink 2.3 (FLIP-558) planning fails unless the INSERT carries an ON CONFLICT clause,
+        // which older versions cannot parse. FORCE keeps the pre-2.3 behaviour on every version.
+        tableEnvironment
+                .getConfig()
+                .getConfiguration()
+                .setString("table.exec.sink.upsert-materialize", upsertMaterialize);
 
         String dataId = TestValuesTableFactory.registerData(changelog);
         tableEnvironment.executeSql(

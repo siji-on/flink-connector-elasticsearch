@@ -90,12 +90,12 @@ class ElasticSearch8AsyncDynamicSinkDeleteStrategyTest {
     }
 
     @Test
-    void testRuntimeProviderFiltersOnlyWhenDeletesAreIgnored() {
+    void testRuntimeProviderFiltersWheneverARowKindIsIgnored() {
         for (DeleteStrategy strategy : DeleteStrategy.values()) {
             DynamicTableSink.SinkRuntimeProvider provider =
                     createSink(strategy, PK_SCHEMA).getSinkRuntimeProvider(new MockContext());
 
-            if (strategy.isIgnoreDelete()) {
+            if (strategy.isIgnoreUpdateBefore() || strategy.isIgnoreDelete()) {
                 assertThat(provider)
                         .as("%s", strategy)
                         .isInstanceOf(

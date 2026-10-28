@@ -1,18 +1,19 @@
-# bucketplace fork — Elasticsearch 8 connector for Flink 2.1
+# bucketplace fork — Elasticsearch 8 connector for Flink 2.x
 
 이 저장소는 [apache/flink-connector-elasticsearch](https://github.com/apache/flink-connector-elasticsearch) 의
-포크다. 목적은 하나다: **Flink 2.1.x 에서 쓸 수 있는 Elasticsearch 8 커넥터**를 만드는 것.
+포크다. 목적은 하나다: **Flink 2.x(2.1 / 2.2 / 2.3) 에서 쓸 수 있는 Elasticsearch 8 커넥터, 특히 SQL uber jar** 를 만드는 것.
 
 ## 왜 포크인가
 
 | 항목 | 상태 (2026-10 기준) |
 | --- | --- |
-| 업스트림 마지막 릴리즈 | `4.0.0-2.0` (2025-04, **Flink 2.0 전용**) — 2.1 / 2.2 용 릴리즈 없음 |
-| 업스트림 `main` (4.1-SNAPSHOT) | Flink **2.2.1** 기준. 벡터 검색(FLINK-38721) 이 2.2 전용 API(`VectorSearchFunction`) 를 써서 **2.1 에서 컴파일 불가** |
-| 업스트림 `v4.0` 브랜치 | Flink 2.0 / 2.1 CI 통과. ES8 Table sink(FLINK-38447) 포함. 단, main 에만 들어간 버그 픽스가 빠져 있음 |
+| 업스트림 마지막 릴리즈 | `4.0.0-2.0` (2025-04, **Flink 2.0 전용**). 2.1 / 2.2 / 2.3 용 릴리즈 없음. `flink-sql-connector-elasticsearch8`(SQL uber jar) 은 **어떤 버전도 Maven Central 에 없음** (모듈이 릴리즈 뒤에 생김) |
+| 업스트림 `main` (4.1-SNAPSHOT) | Flink **2.2.1** 기준, 2.2-SNAPSHOT 만 테스트. 2.1 테스트는 의도적으로 제거(FLINK-39706). 벡터 검색(FLINK-38721) 이 2.2 전용 API(`VectorSearchFunction`) 를 써서 **2.1 에서 컴파일 불가** |
+| 업스트림 `v4.0` 브랜치 | Flink 2.0 / 2.1 weekly 테스트만. ES8 Table sink(FLINK-38447) 포함. 단, main 에만 들어간 버그 픽스가 빠져 있음 |
 | 이전에 쓰던 커넥터 | `com.alibaba.ververica:flink-connector-elasticsearch8:1.17-vvr-*` — 레거시 `SinkFunction` API. **Flink 2.x 에서 제거된 API** 라 사용 불가 |
 
-따라서 `v4.0` 을 베이스로 두고 main 의 ES8 관련 픽스만 cherry-pick 했다.
+따라서 `v4.0` 을 베이스로 두고 main 의 ES8 관련 픽스만 cherry-pick 했다. 같은 소스가 Flink 2.1.3 / 2.2.1 / 2.3.0 에서
+그대로 컴파일·테스트되므로(ITCase 포함) 하나의 브랜치에서 Flink minor 별 산출물을 낸다.
 
 ## 브랜치 구성
 
@@ -27,7 +28,7 @@
   - FLINK-20979 문서, FLINK-28109 dead code
   - FLINK-39798 `flink-sql-connector-elasticsearch8` uber jar 모듈 신설
   - FLINK-39816 uber jar 에 parsson 포함
-- 포크 자체 커밋: 위 cherry-pick 을 v4.0 레이아웃에 맞춘 hotfix, CI 매트릭스(2.1.3), `publish.yml`
+- 포크 자체 커밋: 위 cherry-pick 을 v4.0 레이아웃에 맞춘 hotfix, CI 매트릭스(Flink 2.1.3 / 2.2.1 / 2.3.0 × JDK 17 / 21), `publish.yml`
 - 포크 자체 기능 (bp1): Table/SQL sink 옵션 `sink.delete-strategy` (아래 참고), `sink.bulk-flush.max-in-flight-actions` 가
   실제로 sink 에 전달되도록 수정 (업스트림은 옵션을 읽기만 하고 builder 에 넘기지 않아 항상 기본값 50 이었다)
 - 포크 자체 기능 (bp2): SQL sink 가 문서를 **table format(json) 으로 직렬화**하도록 수정, 레거시 커넥터 DDL 옵션 수용 (아래 참고)
@@ -50,9 +51,11 @@ Alibaba 커넥터의 같은 이름 옵션과 값·의미를 맞췄다(jar `1.17-
 (deprecated) 는 옮기지 않았다 — `CHANGELOG_STANDARD` 가 `ignore-retract=false` 에 해당한다.
 
 구현 메모: Flink 의 `ChangelogMode` 로는 `-U` 만 거부할 수 있고 `-D` 는 거부할 수 없으며, AsyncSink 의
-`ElementConverter` 는 레코드당 요청 하나를 반드시 만들어야 한다. 그래서 `IGNORE_DELETE` 일 때만 sink 앞에
-`filter` 연산자를 끼운 `DataStreamSinkProvider` 를 돌려준다(`ElasticSearch8AsyncDynamicSink.RowKindFilteringSinkProvider`).
-나머지 전략은 기존과 같은 `SinkV2Provider` 다.
+`ElementConverter` 는 레코드당 요청 하나를 반드시 만들어야 한다. 그래서 무시할 RowKind 가 하나라도 있는 전략
+(`CHANGELOG_STANDARD` 제외)에서는 sink 앞에 `filter` 연산자를 끼운 `DataStreamSinkProvider` 를 돌려준다
+(`ElasticSearch8AsyncDynamicSink.RowKindFilteringSinkProvider`). `-U` 는 `ChangelogMode` 로도 거부하지만, Flink 2.3 의
+일부 설정에서는 플래너가 `-U` 를 그대로 내려보내는 것을 확인해(아래 "Flink 2.3 주의") 필터를 항상 둔다. `CHANGELOG_STANDARD`
+는 기존과 같은 `SinkV2Provider` 다.
 
 **DataStream API 에는 이 옵션이 없다.** `sinkTo` 앞에서 직접 `filter` 하거나 `ElementConverter` 안에서 분기한다.
 
@@ -87,13 +90,37 @@ bp2 부터 `RowDataElementConverter` 가 팩토리에서 발견한 format 의 `S
 값은 ms), `document-id.key-delimiter`, `hosts`, `index`, `username`, `password` 는 이름·의미가 같다. Alibaba 의
 `failure-handler`, `retry-on-conflict`, `document-type` 은 지원하지 않는다 (DDL 검증 실패).
 
+## Flink 2.3 주의 — upsert key 와 싱크 PK 가 다르면 플래닝이 실패한다
+
+커넥터 문제는 아니지만 ES 싱크 잡이 가장 먼저 부딪히는 2.3 변경이라 적어 둔다. Flink 2.3(FLIP-558, FLINK-38926)부터
+쿼리의 upsert key 가 싱크 PK 와 다르면(조인·프로젝션 결과, PK 없는 changelog 소스 등) 플래너가 기본적으로 실패한다:
+
+```
+ValidationException: The query has an upsert key that differs from the primary key of the sink table ...
+Please specify an ON CONFLICT clause: ON CONFLICT DO DEDUPLICATE / DO ERROR / DO NOTHING
+```
+
+2.2 까지는 같은 상황에서 `SinkUpsertMaterializer` 를 조용히 끼워 넣었다. 대응은 둘 중 하나다.
+
+| 방법 | 내용 |
+| --- | --- |
+| `INSERT INTO es_sink ... ON CONFLICT DO DEDUPLICATE` | 2.3 권장. 의도를 SQL 에 명시. 2.2 이하에서는 파싱되지 않는다 |
+| `table.exec.sink.upsert-materialize = FORCE` | 2.2 까지의 동작을 그대로 유지. 모든 버전에서 같은 설정이 통한다. 이 포크의 ITCase 가 이 방식을 쓴다 |
+
+`NONE` 은 materializer 를 빼는데, 2.3 에서는 그 경우 싱크가 `ChangelogMode` 로 `UPDATE_BEFORE` 를 거부해도 `-U` 행이 싱크까지
+내려오는 것을 확인했다(2.2 까지는 플래너가 걸러 줬다). 그래서 bp3 부터 `CHANGELOG_STANDARD` 가 아닌 모든 전략에서 sink 앞에
+RowKind 필터를 끼워, 플래너가 어떤 행을 내려보내든 커넥터가 스스로 무시 대상 RowKind 를 버린다.
+
 ## 빌드
 
 ```bash
 export JAVA_HOME=$(/usr/libexec/java_home -v 17)   # JDK 25 로는 빌드하지 않는다
-mvn -DskipTests -Dflink.version=2.1.3 \
+mvn -DskipTests -Dflink.version=2.3.0 \
     -pl flink-connector-elasticsearch8,flink-sql-connector-elasticsearch8 -am install
 ```
+
+`-Dflink.version` 에 2.3.0 / 2.2.1 / 2.1.3 중 하나를 준다(기본값 2.3.0, 주 대상). 로컬 빌드 산출물의 버전은 pom 그대로
+`4.0.1-bp3` 처럼 Flink 접미사가 없다. 접미사(`-2.1` 등)는 publish workflow 가 붙인다(아래 "배포").
 
 산출물:
 
@@ -105,7 +132,7 @@ mvn -DskipTests -Dflink.version=2.1.3 \
 테스트(Testcontainers, ES 8.12.1 이미지, Docker 필요):
 
 ```bash
-mvn -Dflink.version=2.1.3 -pl flink-connector-elasticsearch8,flink-sql-connector-elasticsearch8 verify
+mvn -Dflink.version=2.3.0 -pl flink-connector-elasticsearch8,flink-sql-connector-elasticsearch8 verify
 ```
 
 CI 메모: 공유 ASF workflow 의 라이선스 검사기(`flink-ci-tools`)는 uber jar 안 parsson 의 EPL/GPL-CE 이중 라이선스 헤더를
@@ -182,22 +209,28 @@ poison pill 이 운영상 문제가 되면 `Elasticsearch8AsyncWriter#handlePart
 저장소는 `siji-on/flink-connector-elasticsearch` (apache 저장소의 public 포크, 개인 계정) 이다. 업스트림이
 2.1 릴리즈를 내기 전까지만 쓰는 포크라 org 저장소를 만들지 않았다. 기본 브랜치는 `bp/v4.0-flink-2.1`.
 
-`.github/workflows/publish.yml` — `v*` 태그 push 또는 수동 실행으로 두 곳에 올린다.
+`.github/workflows/publish.yml` — `v<connector>` 태그(예: `v4.0.1-bp3`) push 또는 수동 실행. **Flink minor 마다 한 벌씩**
+(2.1.3 / 2.2.1 / 2.3.0 → `-2.1` / `-2.2` / `-2.3` 접미사) 빌드해 두 곳에 올린다.
 
 | 위치 | 인증 | 용도 |
 | --- | --- | --- |
-| GitHub Release `https://github.com/siji-on/flink-connector-elasticsearch/releases/download/<tag>/<artifact>-<ver>.jar` | 없음 | **소비자(이미지 빌드, Gradle ivy 저장소)가 받는 곳** |
+| GitHub Release `https://github.com/siji-on/flink-connector-elasticsearch/releases/download/<tag>/<artifact>-<connector>-<flink minor>.jar` | 없음 | **소비자(이미지 빌드, Gradle ivy 저장소)가 받는 곳.** 한 Release 에 Flink minor 별 jar 가 함께 있다 |
 | 이 저장소의 GitHub Packages (`maven.pkg.github.com/siji-on/flink-connector-elasticsearch`) | `read:packages` 토큰 | 로컬 Maven/Gradle 에서 편할 때 |
 
+workflow 는 pom 의 버전(`4.0.1-bp3`)을 읽어 `versions:set` 으로 `4.0.1-bp3-2.1` 처럼 바꾼 뒤 빌드한다. Apache 커넥터
+릴리즈와 같은 체계다. 태그는 트리거일 뿐이고 버전의 출처는 pom 이다.
+
 **소비자 연결.** 이 저장소에서 소비자 쪽으로 무언가를 밀어넣지 않는다. 소비자가 빌드 시점에 Release URL 에서 jar 를 받고
-sha256 으로 고정하는 것을 권한다. 공개 Release 라 토큰이 필요 없다.
+sha256 으로 고정하는 것을 권한다. 공개 Release 라 토큰이 필요 없다. 예(bp2, 2.1 전용 태그 시절의 산출물):
 
 ```
 https://github.com/siji-on/flink-connector-elasticsearch/releases/download/v4.0.1-bp2-2.1/flink-sql-connector-elasticsearch8-4.0.1-bp2-2.1.jar
 sha256: 1b62cf24d642da740f6e546e870a54144390f4ab76d57ea6084631c113fdd8cb
 ```
 
-새 버전을 올릴 때는 태그를 push 해 Release 가 생기면 `shasum -a 256` 으로 해시를 구해 소비자 쪽 고정값을 바꾼다.
+bp3 부터는 `.../releases/download/v4.0.1-bp3/flink-sql-connector-elasticsearch8-4.0.1-bp3-2.2.jar` 처럼 태그에는 Flink
+접미사가 없고 파일 이름에만 있다. 새 버전을 올릴 때는 태그를 push 해 Release 가 생기면 workflow 로그 또는 `shasum -a 256` 으로
+해시를 구해 소비자 쪽 고정값을 바꾼다.
 
 Gradle 에서 토큰 없이 받으려면 Release 다운로드 URL 을 ivy 패턴 저장소로 잡는다:
 
@@ -211,7 +244,7 @@ repositories {
     }
 }
 dependencies {
-    implementation("org.apache.flink:flink-connector-elasticsearch8:4.0.1-bp2-2.1")
+    implementation("org.apache.flink:flink-connector-elasticsearch8:4.0.1-bp2-2.1")   // bp3 부터는 패턴을 "v[revision]" 대신 태그 이름에 맞춘다
 }
 ```
 
@@ -221,5 +254,6 @@ dependencies {
 `com.fasterxml.jackson.core:jackson-databind`, `com.fasterxml.jackson.datatype:jackson-datatype-jsr310`.
 이들은 Maven Central 에 pom 이 있으므로 그 아래 전이 의존성(rest client, httpasyncclient, jakarta.json 등)은 따라온다.
 
-버전 규칙은 업스트림과 같이 `<connector>-<flink>` 이고, 업스트림 릴리즈와 구분하기 위해 `bp<N>` 을 끼운다:
-`4.0.1-bp2-2.1`.
+버전 규칙은 업스트림과 같이 `<connector>-<flink minor>` 이고, 업스트림 릴리즈와 구분하기 위해 `bp<N>` 을 끼운다:
+`4.0.1-bp3-2.1`, `4.0.1-bp3-2.2`, `4.0.1-bp3-2.3`. 태그는 `v4.0.1-bp3` 하나다. Flink minor 가 추가되면
+`push_pr.yml` 과 `publish.yml` 의 목록에 패치 버전을 넣고 태그를 다시 단다.
