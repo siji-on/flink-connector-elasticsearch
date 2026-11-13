@@ -72,6 +72,7 @@ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8Conne
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.INDEX_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.KEY_DELIMITER_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.PASSWORD_OPTION;
+import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.RETRY_ON_CONFLICT_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.SOCKET_TIMEOUT;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.SSL_CERTIFICATE_FINGERPRINT;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.USERNAME_OPTION;
@@ -224,7 +225,8 @@ public class ElasticSearch8AsyncDynamicTableFactory extends AsyncDynamicTableSin
                 Stream.of(
                                 BULK_FLUSH_BACKOFF_STRATEGY_OPTION,
                                 BULK_FLUSH_BACKOFF_MAX_RETRIES_OPTION,
-                                BULK_FLUSH_BACKOFF_DELAY_OPTION)
+                                BULK_FLUSH_BACKOFF_DELAY_OPTION,
+                                RETRY_ON_CONFLICT_OPTION)
                         .filter(option -> options.getOptional(option).isPresent())
                         .map(ConfigOption::key)
                         .collect(Collectors.toList());
@@ -267,6 +269,7 @@ public class ElasticSearch8AsyncDynamicTableFactory extends AsyncDynamicTableSin
                         BULK_FLUSH_BACKOFF_STRATEGY_OPTION,
                         BULK_FLUSH_BACKOFF_MAX_RETRIES_OPTION,
                         BULK_FLUSH_BACKOFF_DELAY_OPTION,
+                        RETRY_ON_CONFLICT_OPTION,
                         PASSWORD_OPTION,
                         USERNAME_OPTION,
                         SINK_PARALLELISM,
@@ -301,7 +304,8 @@ public class ElasticSearch8AsyncDynamicTableFactory extends AsyncDynamicTableSin
                         FLUSH_ON_CHECKPOINT_OPTION,
                         BULK_FLUSH_BACKOFF_STRATEGY_OPTION,
                         BULK_FLUSH_BACKOFF_MAX_RETRIES_OPTION,
-                        BULK_FLUSH_BACKOFF_DELAY_OPTION)
+                        BULK_FLUSH_BACKOFF_DELAY_OPTION,
+                        RETRY_ON_CONFLICT_OPTION)
                 .collect(Collectors.toSet());
     }
 }

@@ -61,6 +61,7 @@ class ElasticSearch8AsyncDynamicTableFactoryLegacyOptionsTest {
                         .withOption("sink.bulk-flush.backoff.strategy", "exponential")
                         .withOption("sink.bulk-flush.backoff.delay", "1s")
                         .withOption("sink.bulk-flush.backoff.max-retries", "8")
+                        .withOption("retry-on-conflict", "3")
                         .withOption("sink.bulk-flush.interval", "3000")
                         .withOption("sink.bulk-flush.max-size", "5mb")
                         .withOption("format", "json")

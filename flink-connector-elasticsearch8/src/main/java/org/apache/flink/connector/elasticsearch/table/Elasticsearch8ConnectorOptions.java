@@ -143,6 +143,15 @@ public class Elasticsearch8ConnectorOptions {
                     .withDescription(
                             "Accepted for compatibility with the legacy connector and ignored.");
 
+    public static final ConfigOption<Integer> RETRY_ON_CONFLICT_OPTION =
+            ConfigOptions.key("retry-on-conflict")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Accepted for compatibility with the legacy connector and ignored. "
+                                    + "An update rejected with a version conflict is a failed bulk "
+                                    + "item, which the async sink retries.");
+
     public static final ConfigOption<String> CONNECTION_PATH_PREFIX_OPTION =
             ConfigOptions.key("connection.path-prefix")
                     .stringType()
