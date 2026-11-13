@@ -85,10 +85,11 @@ bp2 부터 `RowDataElementConverter` 가 팩토리에서 발견한 format 의 `S
 | --- | --- |
 | `sink.flush-on-checkpoint` | AsyncSink 는 항상 checkpoint 에서 flush 한다. `false` 는 무시 |
 | `sink.bulk-flush.backoff.strategy` / `.delay` / `.max-retries` | 무시. 실패 항목은 sink 가 자체 재시도 (아래 poison pill 참고) |
+| `retry-on-conflict` | 무시. version conflict 로 거절된 update 는 실패 항목이라 sink 가 자체 재시도 |
 
 `format`, `json.*`, `sink.delete-strategy`, `sink.bulk-flush.max-actions` / `max-size` / `interval`(`'3000'` 같은 단위 없는
 값은 ms), `document-id.key-delimiter`, `hosts`, `index`, `username`, `password` 는 이름·의미가 같다. Alibaba 의
-`failure-handler`, `retry-on-conflict`, `document-type` 은 지원하지 않는다 (DDL 검증 실패).
+`failure-handler`, `document-type` 은 지원하지 않는다 (DDL 검증 실패).
 
 ## Flink 2.3 주의 — upsert key 와 싱크 PK 가 다르면 플래닝이 실패한다
 
